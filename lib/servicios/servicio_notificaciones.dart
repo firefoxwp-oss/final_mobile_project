@@ -39,6 +39,13 @@ abstract interface class MensajeriaPush {
 
   /// Borra el token del celular en Firebase.
   Future<void> borrarToken();
+
+  /// Canciones (`job_id`) de las notificaciones que el usuario toca con la
+  /// aplicación en segundo plano.
+  Stream<String> get cancionesTocadas;
+
+  /// Canción de la notificación que abrió la aplicación cerrada, si la hay.
+  Future<String?> cancionAlAbrir();
 }
 
 /// Muestra notificaciones en la barra del sistema.
@@ -46,8 +53,15 @@ abstract interface class MostradorNotificaciones {
   /// Crea el canal de notificaciones de los procesamientos.
   Future<void> preparar();
 
-  /// Muestra una notificación con su [titulo] y [texto].
-  Future<void> mostrar(int id, String titulo, String texto);
+  /// Muestra una notificación con su [titulo] y [texto]; al tocarla se
+  /// abre la [cancion].
+  Future<void> mostrar(int id, String titulo, String texto, {String? cancion});
+
+  /// Canciones de las notificaciones mostradas que el usuario toca.
+  Stream<String> get cancionesTocadas;
+
+  /// Canción de la notificación mostrada que abrió la aplicación, si la hay.
+  Future<String?> cancionAlAbrir();
 }
 
 /// Notificaciones de finalización del procesamiento (Pb-4).
@@ -76,6 +90,9 @@ class ServicioNotificaciones {
   String? _token;
   final List<StreamSubscription<Object>> _suscripciones =
       <StreamSubscription<Object>>[];
+  final List<StreamSubscription<String>> _toques =
+      <StreamSubscription<String>>[];
+  void Function(String cancion)? _alTocar;
 
   /// Registra el celular para recibir notificaciones del usuario.
   Future<void> iniciarSesion() async {
@@ -114,8 +131,33 @@ class ServicioNotificaciones {
     Map<String, String> datos = const <String, String>{},
   ]) async {
     final int id = (datos['job_id'] ?? titulo).hashCode & 0x7fffffff;
-    await mostrador.mostrar(id, titulo, texto);
+    await mostrador.mostrar(id, titulo, texto, cancion: datos['job_id']);
   }
+
+  /// Al tocar una notificación se llama a [abrir] con su canción, con la
+  /// aplicación abierta, en segundo plano o cerrada (Pb-9).
+  Future<void> alTocarNotificacion(void Function(String cancion) abrir) async {
+    _alTocar = abrir;
+    if (_toques.isNotEmpty) return;
+    try {
+      await mostrador.preparar();
+      _toques
+        ..add(mensajeria.cancionesTocadas.listen(_abrirCancion))
+        ..add(mostrador.cancionesTocadas.listen(_abrirCancion));
+      final String? inicial =
+          await mensajeria.cancionAlAbrir() ?? await mostrador.cancionAlAbrir();
+      if (inicial != null) _abrirCancion(inicial);
+    } on Object catch (e) {
+      _registrarError('escuchar las notificaciones tocadas', e);
+    }
+  }
+
+  /// Deja de abrir canciones con [abrir], p. ej. al salir de la pantalla.
+  void quitarAlTocar(void Function(String cancion) abrir) {
+    if (_alTocar == abrir) _alTocar = null;
+  }
+
+  void _abrirCancion(String cancion) => _alTocar?.call(cancion);
 
   /// Elimina el celular: después de cerrar sesión ya no recibe
   /// notificaciones.

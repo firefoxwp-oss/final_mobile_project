@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -54,12 +56,28 @@ class MensajeriaFirebase implements MensajeriaPush {
   @override
   // ignore: deprecated_member_use
   Future<void> borrarToken() => _fcm.deleteToken();
+
+  @override
+  Stream<String> get cancionesTocadas => FirebaseMessaging.onMessageOpenedApp
+      .map(_cancion)
+      .where((String? c) => c != null)
+      .cast<String>();
+
+  @override
+  Future<String?> cancionAlAbrir() async {
+    final RemoteMessage? mensaje = await _fcm.getInitialMessage();
+    return mensaje == null ? null : _cancion(mensaje);
+  }
+
+  String? _cancion(RemoteMessage mensaje) => mensaje.data['job_id'] as String?;
 }
 
 /// Notificaciones locales en la barra del sistema de Android.
 class MostradorLocal implements MostradorNotificaciones {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
+  final StreamController<String> _tocadas =
+      StreamController<String>.broadcast();
   bool _preparado = false;
 
   @override
@@ -69,6 +87,10 @@ class MostradorLocal implements MostradorNotificaciones {
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       ),
+      onDidReceiveNotificationResponse: (NotificationResponse respuesta) {
+        final String? cancion = respuesta.payload;
+        if (cancion != null) _tocadas.add(cancion);
+      },
     );
     await _plugin
         .resolvePlatformSpecificImplementation<
@@ -79,10 +101,16 @@ class MostradorLocal implements MostradorNotificaciones {
   }
 
   @override
-  Future<void> mostrar(int id, String titulo, String texto) => _plugin.show(
+  Future<void> mostrar(
+    int id,
+    String titulo,
+    String texto, {
+    String? cancion,
+  }) => _plugin.show(
     id: id,
     title: titulo,
     body: texto,
+    payload: cancion,
     notificationDetails: NotificationDetails(
       android: AndroidNotificationDetails(
         canalProcesamientos.id,
@@ -93,4 +121,15 @@ class MostradorLocal implements MostradorNotificaciones {
       ),
     ),
   );
+
+  @override
+  Stream<String> get cancionesTocadas => _tocadas.stream;
+
+  @override
+  Future<String?> cancionAlAbrir() async {
+    final NotificationAppLaunchDetails? inicio = await _plugin
+        .getNotificationAppLaunchDetails();
+    if (!(inicio?.didNotificationLaunchApp ?? false)) return null;
+    return inicio?.notificationResponse?.payload;
+  }
 }

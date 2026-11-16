@@ -36,6 +36,13 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
   void initState() {
     super.initState();
     unawaited(_cargar());
+    unawaited(widget.notificaciones?.alTocarNotificacion(_abrirNotificada));
+  }
+
+  @override
+  void dispose() {
+    widget.notificaciones?.quitarAlTocar(_abrirNotificada);
+    super.dispose();
   }
 
   /// Consulta las canciones del usuario en el servidor.
@@ -67,6 +74,21 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
       builder: (_) => PantallaDetalleCancion(cancion: cancion),
     ),
   );
+
+  /// Al tocar la notificación, la canción aparece en la lista actualizada y,
+  /// si terminó, se abre su detalle; si falló, su error queda a la vista
+  /// (Pb-9).
+  Future<void> _abrirNotificada(String id) async {
+    await _cargar();
+    try {
+      final Cancion cancion = await widget.cliente.obtenerTrabajo(id);
+      if (mounted && cancion.estado == EstadoCancion.terminada) {
+        await _abrir(cancion);
+      }
+    } on ErrorApi {
+      // La lista ya muestra el estado de la canción
+    }
+  }
 
   Future<void> _irAlInicioDeSesion() async {
     await Navigator.of(context).pushAndRemoveUntil(
