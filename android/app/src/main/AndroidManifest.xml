@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Comunicacion con la API REST del servidor (siempre por HTTPS) -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Grabar la interpretacion con el microfono (Pb-13) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
         android:label="Karaoke"
         android:name="${applicationName}"

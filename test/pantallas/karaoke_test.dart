@@ -5,6 +5,7 @@ import 'package:final_mobile_project/pantallas/pantalla_karaoke.dart';
 import 'package:final_mobile_project/servicios/almacen_sesion.dart';
 import 'package:final_mobile_project/servicios/cancion.dart';
 import 'package:final_mobile_project/servicios/cliente_api.dart';
+import 'package:final_mobile_project/servicios/grabador_voz.dart';
 import 'package:final_mobile_project/servicios/reproductor_pistas.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -90,10 +91,39 @@ class _PistaFalsa implements PistaAudio {
   Future<void> liberar() async {}
 }
 
+/// Micrófono simulado: escribe un archivo al grabar.
+class _GrabadorFalso implements GrabadorVoz {
+  _GrabadorFalso({this.permiso = true});
+
+  final bool permiso;
+  String? ruta;
+  bool grabando = false;
+
+  @override
+  Future<bool> pedirPermisoMicrofono() async => permiso;
+
+  @override
+  Future<void> iniciar(String destino) async {
+    ruta = destino;
+    grabando = true;
+    File(destino).writeAsBytesSync(<int>[1, 2, 3]);
+  }
+
+  @override
+  Future<String?> detener() async {
+    grabando = false;
+    return ruta;
+  }
+
+  @override
+  Future<void> liberar() async {}
+}
+
 void main() {
   late Directory cache;
   late _PistaFalsa instrumental;
   late _PistaFalsa voz;
+  late _GrabadorFalso grabador;
   final List<String> peticiones = <String>[];
 
   setUp(() async {
@@ -106,6 +136,7 @@ void main() {
     peticiones.clear();
     instrumental = _PistaFalsa();
     voz = _PistaFalsa();
+    grabador = _GrabadorFalso();
   });
 
   tearDown(() => cache.delete(recursive: true));
@@ -159,6 +190,8 @@ void main() {
           cancion: _cancion,
           crearReproductor: () =>
               ReproductorPistas(<PistaAudio>[instrumental, voz]),
+          crearGrabador: () => grabador,
+          carpetaGrabaciones: () async => cache,
         ),
       ),
     );
@@ -283,6 +316,101 @@ void main() {
     expect(find.text('-200 ms'), findsOneWidget);
     expect(cantado(tester), 'cantando ');
     await tester.tap(find.byKey(const Key('botonReproducir')));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  /// Ejecuta en tiempo real las tareas del archivo y del micrófono.
+  Future<void> esperar(WidgetTester tester) async {
+    for (int i = 0; i < 5; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 30)),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+  }
+
+  testWidgets('graba la voz mientras suena la canción desde el inicio', (
+    tester,
+  ) async {
+    await abrir(tester);
+    instrumental.posicion = const Duration(seconds: 6);
+
+    await tester.tap(find.byKey(const Key('botonGrabar')));
+    await esperar(tester);
+
+    expect(grabador.grabando, isTrue);
+    expect(grabador.ruta, contains('grabaciones'));
+    expect(instrumental.sonando && voz.sonando, isTrue);
+    expect(find.byKey(const Key('avisoGrabacion')), findsOneWidget);
+    expect(find.text('Usa audífonos para que solo se grabe tu voz'), findsOne);
+    // Mientras se graba no se cambia el tono ni la posición
+    final IconButton tono = tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byTooltip('Subir Tono'),
+        matching: find.byType(IconButton),
+      ),
+    );
+    expect(tono.onPressed, isNull);
+
+    instrumental.posicion = const Duration(seconds: 4);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('Grabando · 0:04'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('botonDetener')));
+    await esperar(tester);
+
+    expect(grabador.grabando, isFalse);
+    expect(instrumental.sonando, isFalse);
+    expect(find.byKey(const Key('resultadoGrabacion')), findsOneWidget);
+    expect(find.text('mi_cancion · 0:04'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('la grabación termina con la canción', (tester) async {
+    await abrir(tester);
+    await tester.tap(find.byKey(const Key('botonGrabar')));
+    await esperar(tester);
+
+    instrumental.posicion = const Duration(seconds: 12);
+    await esperar(tester);
+
+    expect(grabador.grabando, isFalse);
+    expect(find.byKey(const Key('resultadoGrabacion')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('descartar borra la grabación', (tester) async {
+    await abrir(tester);
+    await tester.tap(find.byKey(const Key('botonGrabar')));
+    await esperar(tester);
+    await tester.tap(find.byKey(const Key('botonDetener')));
+    await esperar(tester);
+    final File voz = File(grabador.ruta!);
+    expect(voz.existsSync(), isTrue);
+
+    await tester.ensureVisible(find.text('Descartar'));
+    await tester.tap(find.text('Descartar'));
+    await esperar(tester);
+
+    expect(voz.existsSync(), isFalse);
+    expect(find.byKey(const Key('resultadoGrabacion')), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('sin el permiso del micrófono explica cómo darlo', (
+    tester,
+  ) async {
+    grabador = _GrabadorFalso(permiso: false);
+    await abrir(tester);
+
+    await tester.tap(find.byKey(const Key('botonGrabar')));
+    await esperar(tester);
+
+    expect(find.byKey(const Key('dialogoPermiso')), findsOneWidget);
+    expect(find.textContaining('Permisos → Micrófono'), findsOneWidget);
+    expect(grabador.grabando, isFalse);
+    expect(instrumental.sonando, isFalse);
+    await tester.tap(find.text('Entendido'));
     await tester.pumpWidget(const SizedBox());
   });
 
