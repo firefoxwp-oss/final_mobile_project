@@ -46,3 +46,6 @@ app.*.map.json
 
 # Variables de entorno (datos locales y sensibles)
 .env
+
+# Configuración de Firebase de la app (se copia desde la carpeta de credenciales)
+android/app/google-services.json
