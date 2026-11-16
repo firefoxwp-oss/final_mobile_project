@@ -180,13 +180,17 @@ class ReproductorPistas {
 
   /// Carga un archivo por pista, en el mismo orden de [pistas], con la
   /// [letra] y la [configuracion] de la canción.
+  ///
+  /// Las [rutas] pueden estar todavía descargándose: cada pista se carga en
+  /// cuanto su archivo está listo, sin esperar a las demás.
   Future<void> cargar(
-    List<String> rutas, {
+    List<FutureOr<String>> rutas, {
     Letra? letra,
     ConfiguracionKaraoke? configuracion,
   }) async {
     final List<Duration?> duraciones = await Future.wait(<Future<Duration?>>[
-      for (int i = 0; i < pistas.length; i++) pistas[i].cargar(rutas[i]),
+      for (int i = 0; i < pistas.length; i++)
+        Future<String>.value(rutas[i]).then(pistas[i].cargar),
     ]);
     duracion = duraciones.first;
     if (letra != null) this.letra = letra;
