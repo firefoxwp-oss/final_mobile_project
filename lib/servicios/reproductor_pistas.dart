@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:just_audio/just_audio.dart';
 
+import '../datos/configuracion_karaoke.dart';
+import 'letra.dart';
+
 /// Pista de audio que se reproduce junto con otras.
 abstract interface class PistaAudio {
   /// Carga el archivo de la pista y devuelve su duración.
@@ -70,6 +73,41 @@ class PistaDispositivo implements PistaAudio {
   Future<void> liberar() => _reproductor.dispose();
 }
 
+/// Línea actual de la letra separada en lo ya cantado y lo que falta, con
+/// la línea anterior y la siguiente.
+class LetraResaltada {
+  /// Crea la línea resaltada.
+  const LetraResaltada({
+    this.anterior = '',
+    this.cantado = '',
+    this.pendiente = '',
+    this.siguiente = '',
+  });
+
+  /// Línea que ya se cantó.
+  final String anterior;
+
+  /// Palabras de la línea actual que ya empezaron a cantarse.
+  final String cantado;
+
+  /// Palabras de la línea actual que faltan.
+  final String pendiente;
+
+  /// Línea que sigue.
+  final String siguiente;
+
+  @override
+  bool operator ==(Object other) =>
+      other is LetraResaltada &&
+      other.anterior == anterior &&
+      other.cantado == cantado &&
+      other.pendiente == pendiente &&
+      other.siguiente == siguiente;
+
+  @override
+  int get hashCode => Object.hash(anterior, cantado, pendiente, siguiente);
+}
+
 /// Reproduce el instrumental y la voz guía a la vez, sincronizados (Pb-10).
 ///
 /// La primera pista marca la posición de la canción. Cada reproductor del
@@ -114,6 +152,12 @@ class ReproductorPistas {
   /// Duración de la canción, conocida al cargarla.
   Duration? duracion;
 
+  /// Letra sincronizada de la canción.
+  Letra letra = const Letra(<LineaLetra>[]);
+
+  /// Voz guía, sincronía y tono de la canción.
+  ConfiguracionKaraoke configuracion = const ConfiguracionKaraoke();
+
   bool _sonando = false;
   final Map<PistaAudio, double> _velocidades = <PistaAudio, double>{};
 
@@ -134,12 +178,46 @@ class ReproductorPistas {
     return mayor;
   }
 
-  /// Carga un archivo por pista, en el mismo orden de [pistas].
-  Future<void> cargar(List<String> rutas) async {
+  /// Carga un archivo por pista, en el mismo orden de [pistas], con la
+  /// [letra] y la [configuracion] de la canción.
+  Future<void> cargar(
+    List<String> rutas, {
+    Letra? letra,
+    ConfiguracionKaraoke? configuracion,
+  }) async {
     final List<Duration?> duraciones = await Future.wait(<Future<Duration?>>[
       for (int i = 0; i < pistas.length; i++) pistas[i].cargar(rutas[i]),
     ]);
     duracion = duraciones.first;
+    if (letra != null) this.letra = letra;
+    if (configuracion != null) this.configuracion = configuracion;
+    if (pistas.length > 1) await cambiarVolumenVoz(this.configuracion.vozGuia);
+  }
+
+  /// Separa la línea que se canta en la posición del audio, corrida por el
+  /// ajuste de sincronía: las palabras que ya empezaron quedan resaltadas.
+  LetraResaltada resaltarPalabra(Duration posicionAudio) {
+    final List<LineaLetra> lineas = letra.lineas;
+    if (lineas.isEmpty) return const LetraResaltada();
+    final Duration momento =
+        posicionAudio + Duration(milliseconds: configuracion.desfaseMs);
+    final int indice = letra.indiceLinea(momento);
+    final List<PalabraLetra> palabras = lineas[indice].palabras;
+    final int cantadas = palabras
+        .where((PalabraLetra palabra) => palabra.inicio <= momento)
+        .length;
+    String unir(Iterable<PalabraLetra> parte) =>
+        parte.map((PalabraLetra palabra) => palabra.texto).join(' ');
+    final String cantado = unir(palabras.take(cantadas));
+    final String pendiente = unir(palabras.skip(cantadas));
+    return LetraResaltada(
+      anterior: indice > 0 ? lineas[indice - 1].texto : '',
+      cantado: cantado.isNotEmpty && pendiente.isNotEmpty
+          ? '$cantado '
+          : cantado,
+      pendiente: pendiente,
+      siguiente: indice + 1 < lineas.length ? lineas[indice + 1].texto : '',
+    );
   }
 
   /// Empieza o continúa todas las pistas a la vez, cuando todas tienen el
@@ -168,6 +246,12 @@ class ReproductorPistas {
   /// Cambia el volumen de la pista [indice], de 0 a 1.
   Future<void> cambiarVolumen(int indice, double nivel) =>
       pistas[indice].volumen(nivel);
+
+  /// Cambia el volumen de la voz guía, de 0 a 100, sin cortar la canción.
+  Future<void> cambiarVolumenVoz(int nivel) {
+    configuracion = configuracion.copiar(vozGuia: nivel);
+    return cambiarVolumen(1, nivel / 100);
+  }
 
   /// Corrige la separación de cada pista respecto del instrumental; se
   /// llama varias veces por segundo mientras suena la canción.

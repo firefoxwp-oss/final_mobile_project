@@ -1,7 +1,13 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 
+import 'package:flutter/material.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+
+import '../datos/configuracion_karaoke.dart';
 import '../servicios/cancion.dart';
 import '../servicios/cliente_api.dart';
+import '../servicios/letra.dart';
+import '../servicios/reproductor_pistas.dart';
 
 /// Rango del cambio de tono, en semitonos (RI-05).
 const int tonoMinimo = -6;
@@ -22,6 +28,7 @@ class PantallaKaraoke extends StatefulWidget {
   const PantallaKaraoke({
     required this.cliente,
     required this.cancion,
+    this.crearReproductor,
     super.key,
   });
 
@@ -31,17 +38,140 @@ class PantallaKaraoke extends StatefulWidget {
   /// Canción terminada de tipo karaoke.
   final Cancion cancion;
 
+  /// Crea el reproductor del instrumental y la voz guía; en las pruebas se
+  /// reemplaza por uno simulado.
+  final ReproductorPistas Function()? crearReproductor;
+
   @override
   State<PantallaKaraoke> createState() => _PantallaKaraokeState();
 }
 
 class _PantallaKaraokeState extends State<PantallaKaraoke> {
-  final bool _sonando = false;
-  final Duration _posicion = Duration.zero;
-  final Duration _duracion = Duration.zero;
+  /// Cada cuánto se actualiza la palabra resaltada.
+  static const Duration _cuadro = Duration(milliseconds: 40);
+
+  /// Cada cuánto se corrige la separación entre las pistas.
+  static const int _cuadrosPorSincronia = 6;
+
+  late final ReproductorPistas _reproductor =
+      widget.crearReproductor?.call() ??
+      ReproductorPistas(<PistaAudio>[PistaDispositivo(), PistaDispositivo()]);
+  Timer? _reloj;
+  int _cuadros = 0;
+  bool _cargada = false;
+  String? _error;
+  Duration _posicion = Duration.zero;
+  Duration _duracion = Duration.zero;
+  Duration? _arrastre;
+  LetraResaltada _letra = const LetraResaltada();
   int _vozGuia = 30;
   int _semitonos = 0;
   int _desfaseMs = 0;
+
+  bool get _sonando => _reproductor.sonando;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_cargar());
+  }
+
+  /// abrir(cancion): obtiene la letra y las pistas y las carga en el
+  /// reproductor (secuencia de Pb-10).
+  Future<void> _cargar() async {
+    final String id = widget.cancion.id;
+    try {
+      final Letra letra = await widget.cliente.obtenerLetra(id);
+      final List<String> rutas = await Future.wait(<Future<String>>[
+        widget.cliente.obtenerPista(id, 'instrumental'),
+        widget.cliente.obtenerPista(id, 'voz'),
+      ]);
+      await _reproductor.cargar(
+        rutas,
+        letra: letra,
+        configuracion: ConfiguracionKaraoke(
+          vozGuia: _vozGuia,
+          desfaseMs: _desfaseMs,
+          semitonos: _semitonos,
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _cargada = true;
+        _duracion = _reproductor.duracion ?? Duration.zero;
+        _letra = _reproductor.resaltarPalabra(Duration.zero);
+      });
+    } on ErrorApi catch (e) {
+      if (mounted) setState(() => _error = e.mensaje);
+    } on Object {
+      if (mounted) setState(() => _error = 'No se pudo cargar la canción.');
+    }
+  }
+
+  Future<void> _alternar() async {
+    if (_sonando) {
+      _reloj?.cancel();
+      await _reproductor.pausar();
+      unawaited(_mantenerPantalla(encendida: false));
+    } else {
+      if (_posicion >= _duracion) await _reproductor.buscar(Duration.zero);
+      await _reproductor.reproducir();
+      _reloj = Timer.periodic(_cuadro, (_) => _actualizar());
+      unawaited(_mantenerPantalla(encendida: true));
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// La pantalla no se apaga mientras suena la canción; si el sistema no lo
+  /// permite, la canción sigue sonando igual.
+  Future<void> _mantenerPantalla({required bool encendida}) async {
+    try {
+      await WakelockPlus.toggle(enable: encendida);
+    } on Object {
+      return;
+    }
+  }
+
+  /// resaltarPalabra(posicionAudio + desfase), mientras suena la canción.
+  void _actualizar() {
+    final Duration posicion = _reproductor.posicion;
+    if (++_cuadros % _cuadrosPorSincronia == 0) {
+      unawaited(_reproductor.sincronizar());
+    }
+    if (_duracion > Duration.zero && posicion >= _duracion) {
+      unawaited(_alternar());
+      return;
+    }
+    final LetraResaltada letra = _reproductor.resaltarPalabra(posicion);
+    // La barra avanza cada 250 ms; la letra, en cuanto cambia una palabra
+    if (letra != _letra ||
+        posicion.inMilliseconds ~/ 250 != _posicion.inMilliseconds ~/ 250) {
+      setState(() {
+        _posicion = posicion;
+        _letra = letra;
+      });
+    }
+  }
+
+  Future<void> _mover(double milisegundos) async {
+    final Duration destino = Duration(milliseconds: milisegundos.round());
+    setState(() => _arrastre = null);
+    await _reproductor.buscar(destino);
+    if (mounted) {
+      setState(() {
+        _posicion = destino;
+        _letra = _reproductor.resaltarPalabra(destino);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _reloj?.cancel();
+    unawaited(_mantenerPantalla(encendida: false));
+    unawaited(_reproductor.liberar());
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,24 +191,54 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
             style: TextStyle(color: tema.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
-          const PanelLetra(),
+          if (_error != null)
+            Container(
+              key: const Key('errorKaraoke'),
+              height: 200,
+              alignment: Alignment.center,
+              child: Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: tema.colorScheme.error),
+              ),
+            )
+          else if (!_cargada)
+            const SizedBox(
+              height: 200,
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else
+            PanelLetra(
+              anterior: _letra.anterior,
+              cantado: _letra.cantado,
+              pendiente: _letra.pendiente,
+              siguiente: _letra.siguiente,
+            ),
           const SizedBox(height: 16),
           Row(
             children: <Widget>[
               IconButton.filled(
                 key: const Key('botonReproducir'),
                 tooltip: _sonando ? 'Pausar' : 'Reproducir',
-                onPressed: null,
+                onPressed: _cargada ? _alternar : null,
                 icon: Icon(_sonando ? Icons.pause : Icons.play_arrow),
               ),
               const SizedBox(width: 8),
-              Text(formatoTiempo(_posicion)),
+              Text(formatoTiempo(_arrastre ?? _posicion)),
               Expanded(
                 child: Slider(
                   key: const Key('barraPosicion'),
-                  value: _posicion.inMilliseconds.toDouble().clamp(0, total),
+                  value: (_arrastre ?? _posicion).inMilliseconds
+                      .toDouble()
+                      .clamp(0, total),
                   max: total == 0 ? 1 : total,
-                  onChanged: null,
+                  onChanged: _cargada
+                      ? (double valor) => setState(
+                          () =>
+                              _arrastre = Duration(milliseconds: valor.round()),
+                        )
+                      : null,
+                  onChangeEnd: _cargada ? _mover : null,
                 ),
               ),
               Text(formatoTiempo(_duracion)),
@@ -101,8 +261,10 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
                   max: 100,
                   divisions: 20,
                   label: '$_vozGuia %',
-                  onChanged: (double valor) =>
-                      setState(() => _vozGuia = valor.round()),
+                  onChanged: (double valor) {
+                    setState(() => _vozGuia = valor.round());
+                    unawaited(_reproductor.cambiarVolumenVoz(_vozGuia));
+                  },
                 ),
               ),
               SizedBox(width: 48, child: Text('$_vozGuia %')),
