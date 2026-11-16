@@ -1,8 +1,15 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:final_mobile_project/pantallas/pantalla_subida.dart';
+import 'package:final_mobile_project/servicios/almacen_sesion.dart';
 import 'package:final_mobile_project/servicios/cliente_api.dart';
 import 'package:final_mobile_project/servicios/selector_video.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:image_picker/image_picker.dart';
 
 VideoElegido _video(
@@ -78,6 +85,68 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const Key('mensajeErrorSubida')), findsOneWidget);
+  });
+
+  testWidgets('sube el video y sigue el estado del trabajo', (tester) async {
+    FlutterSecureStorage.setMockInitialValues(<String, String>{
+      'token_acceso': 'acceso',
+      'token_renovacion': 'renovacion',
+    });
+    int consultas = 0;
+    final ClienteApi cliente = ClienteApi(
+      cliente: MockClient((http.Request p) async {
+        if (p.url.path == '/refresh') {
+          return http.Response(
+            '{"access_token": "a", "refresh_token": "r"}',
+            200,
+          );
+        }
+        if (p.url.path == '/procesar-video/') {
+          return http.Response('{"job_id": "abc", "status": "queued"}', 202);
+        }
+        consultas++;
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'id': 'abc',
+            'source_filename': 'mi_cancion.mp4',
+            'status': consultas == 1 ? 'queued' : 'running',
+            'progress': consultas == 1 ? 0 : 45,
+            'queue_position': consultas == 1 ? 1 : null,
+            'created_at': '2026-10-13T10:00:00Z',
+          }),
+          200,
+        );
+      }),
+      almacen: AlmacenSesion(),
+      url: 'https://api.prueba',
+    );
+    final VideoElegido video = VideoElegido(
+      archivo: XFile.fromData(Uint8List(1000), name: 'mi_cancion.mp4'),
+      nombre: 'mi_cancion.mp4',
+      bytes: 1000,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PantallaSubida(cliente: cliente, selector: _SelectorFalso(video)),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('botonGaleria')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('botonSubirVideo')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pump();
+    expect(find.text('En cola · posición 1'), findsOneWidget);
+
+    // El estado se vuelve a consultar sin salir de la pantalla
+    await tester.pump(const Duration(seconds: 3));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+    expect(find.text('Procesando · 45 %'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
   });
 
   group('validarVideo', () {

@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../configuracion.dart';
 import 'almacen_sesion.dart';
 import 'cancion.dart';
+import 'selector_video.dart';
 
 /// Error de la API con un mensaje comprensible para el usuario.
 class ErrorApi implements Exception {
@@ -120,6 +121,65 @@ class ClienteApi {
     ];
   }
 
+  /// Canción (trabajo) con su estado, posición en la cola y avance.
+  Future<Cancion> obtenerTrabajo(String id) async => Cancion.desdeJson(
+    await obtener('/jobs/${Uri.encodeComponent(id)}') as Map<String, dynamic>,
+  );
+
+  /// Sube el [video] para procesarlo y devuelve el id del trabajo en cola
+  /// (Pb-9). [alProgreso] recibe la fracción enviada, de 0 a 1.
+  ///
+  /// El archivo se envía por partes, sin cargarlo entero en memoria.
+  Future<String> subirVideo(
+    VideoElegido video,
+    String tipoVideo, {
+    void Function(double avance)? alProgreso,
+  }) async {
+    // Un video grande tarda en subir: se parte de un token recién renovado
+    if (!await renovarSesion()) {
+      throw const ErrorApi(
+        'Tu sesión venció. Vuelve a iniciar sesión.',
+        sesionVencida: true,
+      );
+    }
+    final String? acceso = await almacen.leerTokenAcceso();
+    int enviados = 0;
+    final Stream<List<int>> datos = video.archivo.openRead().map((
+      List<int> parte,
+    ) {
+      enviados += parte.length;
+      alProgreso?.call(
+        video.bytes == 0 ? 1 : (enviados / video.bytes).clamp(0, 1),
+      );
+      return parte;
+    });
+    final http.MultipartRequest peticion =
+        http.MultipartRequest('POST', uri('/procesar-video/'))
+          ..headers['Authorization'] = 'Bearer $acceso'
+          ..fields['video_type'] = tipoVideo
+          ..files.add(
+            http.MultipartFile(
+              'file',
+              datos,
+              video.bytes,
+              filename: video.nombre,
+            ),
+          );
+    final http.Response respuesta;
+    try {
+      respuesta = await http.Response.fromStream(await _cliente.send(peticion));
+    } on http.ClientException {
+      throw const ErrorApi('No se pudo conectar con el servidor');
+    }
+    if (respuesta.statusCode == 400 || respuesta.statusCode == 413) {
+      throw ErrorApi(_detalle(respuesta) ?? 'El archivo no es válido');
+    }
+    _comprobar(respuesta);
+    final Map<String, dynamic> datosRespuesta =
+        jsonDecode(respuesta.body) as Map<String, dynamic>;
+    return datosRespuesta['job_id'] as String;
+  }
+
   /// Registra el celular para recibir las notificaciones de finalización.
   Future<void> registrarDispositivo(String token) async {
     await _conToken(
@@ -189,6 +249,19 @@ class ClienteApi {
     } on http.ClientException {
       throw const ErrorApi('No se pudo conectar con el servidor');
     }
+  }
+
+  /// Mensaje del servidor (`detail`) para el usuario, si lo hay.
+  String? _detalle(http.Response respuesta) {
+    try {
+      final Object? cuerpo = jsonDecode(utf8.decode(respuesta.bodyBytes));
+      if (cuerpo is Map<String, dynamic> && cuerpo['detail'] is String) {
+        return cuerpo['detail'] as String;
+      }
+    } on FormatException {
+      return null;
+    }
+    return null;
   }
 
   void _comprobar(http.Response respuesta) {

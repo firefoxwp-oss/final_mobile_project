@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../servicios/cancion.dart';
 import '../servicios/cliente_api.dart';
 import '../servicios/selector_video.dart';
 
@@ -24,6 +27,12 @@ class _PantallaSubidaState extends State<PantallaSubida> {
   String _tipo = 'karaoke';
   double? _avance;
   String? _error;
+  bool _subiendo = false;
+  Cancion? _trabajo;
+  Timer? _consulta;
+
+  /// Retraso máximo del estado mostrado, como en la web (RR-02).
+  static const Duration _intervalo = Duration(seconds: 3);
 
   late final SelectorVideo _selector =
       widget.selector ?? SelectorVideoDispositivo();
@@ -46,11 +55,64 @@ class _PantallaSubidaState extends State<PantallaSubida> {
     });
   }
 
+  /// subirVideo(archivo, tipoVideo, alProgreso) y, ya en la cola,
+  /// obtenerTrabajo(job_id) hasta que termine (secuencia de Pb-9).
+  Future<void> _subir() async {
+    final VideoElegido? video = _video;
+    if (video == null) return;
+    setState(() {
+      _subiendo = true;
+      _avance = 0;
+      _error = null;
+    });
+    try {
+      final String id = await widget.cliente.subirVideo(
+        video,
+        _tipo,
+        alProgreso: (double avance) {
+          if (mounted) setState(() => _avance = avance);
+        },
+      );
+      await _seguir(id);
+      _consulta = Timer.periodic(_intervalo, (_) => unawaited(_seguir(id)));
+    } on ErrorApi catch (e) {
+      if (mounted) {
+        setState(() {
+          _subiendo = false;
+          _avance = null;
+          _error = e.mensaje;
+        });
+      }
+    }
+  }
+
+  Future<void> _seguir(String id) async {
+    try {
+      final Cancion trabajo = await widget.cliente.obtenerTrabajo(id);
+      if (!mounted) return;
+      setState(() => _trabajo = trabajo);
+      final bool enCurso =
+          trabajo.estado == EstadoCancion.enCola ||
+          trabajo.estado == EstadoCancion.procesando;
+      if (!enCurso) _consulta?.cancel();
+    } on ErrorApi {
+      // Una consulta fallida se repite en la siguiente vuelta
+    }
+  }
+
+  @override
+  void dispose() {
+    _consulta?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final ThemeData tema = Theme.of(context);
     final VideoElegido? video = _video;
     final double? avance = _avance;
+    final Cancion? trabajo = _trabajo;
+    final bool puedeSubir = video != null && _error == null && !_subiendo;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Subir canción'),
@@ -64,7 +126,9 @@ class _PantallaSubidaState extends State<PantallaSubida> {
               Expanded(
                 child: OutlinedButton.icon(
                   key: const Key('botonGaleria'),
-                  onPressed: () => _elegir(_selector.elegirDeGaleria),
+                  onPressed: _subiendo
+                      ? null
+                      : () => _elegir(_selector.elegirDeGaleria),
                   icon: const Icon(Icons.photo_library_outlined),
                   label: const Text('Galería'),
                 ),
@@ -73,7 +137,9 @@ class _PantallaSubidaState extends State<PantallaSubida> {
               Expanded(
                 child: OutlinedButton.icon(
                   key: const Key('botonCamara'),
-                  onPressed: () => _elegir(_selector.grabarConCamara),
+                  onPressed: _subiendo
+                      ? null
+                      : () => _elegir(_selector.grabarConCamara),
                   icon: const Icon(Icons.videocam_outlined),
                   label: const Text('Cámara'),
                 ),
@@ -100,8 +166,9 @@ class _PantallaSubidaState extends State<PantallaSubida> {
           ),
           RadioGroup<String>(
             groupValue: _tipo,
-            onChanged: (String? valor) =>
-                setState(() => _tipo = valor ?? 'karaoke'),
+            onChanged: (String? valor) {
+              if (!_subiendo) setState(() => _tipo = valor ?? 'karaoke');
+            },
             child: const Column(
               children: <Widget>[
                 RadioListTile<String>(
@@ -120,20 +187,34 @@ class _PantallaSubidaState extends State<PantallaSubida> {
           const SizedBox(height: 16),
           FilledButton(
             key: const Key('botonSubirVideo'),
-            onPressed: null,
+            onPressed: puedeSubir ? _subir : null,
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(52),
             ),
             child: const Text('Subir'),
           ),
-          if (avance != null) ...<Widget>[
+          if (avance != null && trabajo == null) ...<Widget>[
             const SizedBox(height: 24),
             Text(
               'Subiendo… ${(avance * 100).round()} %',
+              key: const Key('avanceSubida'),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             LinearProgressIndicator(value: avance, minHeight: 8),
+          ],
+          if (trabajo != null) ...<Widget>[
+            const SizedBox(height: 24),
+            Text(
+              trabajo.detalle,
+              key: const Key('estadoTrabajo'),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: trabajo.progreso / 100,
+              minHeight: 8,
+            ),
           ],
           const SizedBox(height: 32),
           Text(
