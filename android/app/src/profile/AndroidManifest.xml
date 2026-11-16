@@ -4,4 +4,8 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Solo en depuracion y en perfil (mediciones en el emulador): permite
+         HTTP con el servidor local. La version de produccion usa unicamente
+         HTTPS. -->
+    <application android:networkSecurityConfig="@xml/red_desarrollo"/>
 </manifest>
