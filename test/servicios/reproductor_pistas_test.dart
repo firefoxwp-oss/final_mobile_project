@@ -150,6 +150,27 @@ void main() {
     expect(instrumental.sonando && voz.sonando, isTrue);
   });
 
+  test('cambia las pistas y sigue sonando desde la misma posición', () async {
+    final _PistaFalsa instrumental = _PistaFalsa(Duration.zero);
+    final _PistaFalsa voz = _PistaFalsa(Duration.zero);
+    final ReproductorPistas reproductor = ReproductorPistas(<PistaAudio>[
+      instrumental,
+      voz,
+    ]);
+    await reproductor.cargar(<String>['i.m4a', 'v.m4a']);
+    await reproductor.reproducir();
+
+    await reproductor.cambiarPistas(<String>[
+      'i_2.m4a',
+      'v_2.m4a',
+    ], const Duration(seconds: 42));
+
+    expect(instrumental.posicion, const Duration(seconds: 42));
+    expect(voz.posicion, const Duration(seconds: 42));
+    expect(voz.nivel, 0.3);
+    expect(instrumental.sonando && voz.sonando, isTrue);
+  });
+
   test('cambia el volumen solo de la pista indicada', () async {
     final _PistaFalsa instrumental = _PistaFalsa(Duration.zero);
     final _PistaFalsa voz = _PistaFalsa(Duration.zero);
