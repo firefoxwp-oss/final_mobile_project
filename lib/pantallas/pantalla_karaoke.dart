@@ -81,6 +81,15 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
   Future<void> _cargar() async {
     final String id = widget.cancion.id;
     try {
+      final ConfiguracionKaraoke configuracion =
+          await ConfiguracionKaraoke.leer(id);
+      if (mounted) {
+        setState(() {
+          _vozGuia = configuracion.vozGuia;
+          _desfaseMs = configuracion.desfaseMs;
+          _semitonos = configuracion.semitonos;
+        });
+      }
       final Letra letra = await widget.cliente.obtenerLetra(id);
       final List<String> rutas = await Future.wait(<Future<String>>[
         widget.cliente.obtenerPista(id, 'instrumental'),
@@ -89,11 +98,7 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
       await _reproductor.cargar(
         rutas,
         letra: letra,
-        configuracion: ConfiguracionKaraoke(
-          vozGuia: _vozGuia,
-          desfaseMs: _desfaseMs,
-          semitonos: _semitonos,
-        ),
+        configuracion: configuracion,
       );
       if (!mounted) return;
       setState(() {
@@ -151,6 +156,22 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
         _letra = letra;
       });
     }
+  }
+
+  /// Recuerda la voz guía, la sincronía y el tono en el celular.
+  Future<void> _guardar() =>
+      _reproductor.configuracion.guardar(widget.cancion.id);
+
+  /// Mueve la letra respecto del audio y la vuelve a resaltar enseguida.
+  void _cambiarSincronia(int desfaseMs) {
+    _reproductor.configuracion = _reproductor.configuracion.copiar(
+      desfaseMs: desfaseMs,
+    );
+    setState(() {
+      _desfaseMs = desfaseMs;
+      _letra = _reproductor.resaltarPalabra(_reproductor.posicion);
+    });
+    unawaited(_guardar());
   }
 
   Future<void> _mover(double milisegundos) async {
@@ -265,6 +286,7 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
                     setState(() => _vozGuia = valor.round());
                     unawaited(_reproductor.cambiarVolumenVoz(_vozGuia));
                   },
+                  onChangeEnd: (_) => unawaited(_guardar()),
                 ),
               ),
               SizedBox(width: 48, child: Text('$_vozGuia %')),
@@ -288,10 +310,10 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
             etiqueta: 'Sincronía',
             valor: '$_desfaseMs ms',
             alBajar: _desfaseMs > -sincroniaMaxima
-                ? () => setState(() => _desfaseMs -= pasoSincronia)
+                ? () => _cambiarSincronia(_desfaseMs - pasoSincronia)
                 : null,
             alSubir: _desfaseMs < sincroniaMaxima
-                ? () => setState(() => _desfaseMs += pasoSincronia)
+                ? () => _cambiarSincronia(_desfaseMs + pasoSincronia)
                 : null,
           ),
           const SizedBox(height: 24),

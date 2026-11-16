@@ -11,6 +11,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 final Cancion _cancion = Cancion.desdeJson(<String, dynamic>{
   'id': 'abc',
@@ -94,6 +95,7 @@ void main() {
       'token_acceso': 'acceso',
       'token_renovacion': 'renovacion',
     });
+    SharedPreferences.setMockInitialValues(<String, Object>{});
     cache = await Directory.systemTemp.createTemp('karaoke');
     instrumental = _PistaFalsa();
     voz = _PistaFalsa();
@@ -217,6 +219,44 @@ void main() {
     expect(voz.nivel, 0);
     expect(instrumental.nivel, 1);
     expect(find.text('0 %'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('recuerda la voz guía y la sincronía', (tester) async {
+    await abrir(tester);
+    await tester.drag(
+      find.byKey(const Key('controlVozGuia')),
+      const Offset(-400, 0),
+    );
+    await tester.tap(find.byTooltip('Bajar Sincronía'));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+
+    // Al volver a abrir el Modo Karaoke se usan los valores elegidos
+    voz = _PistaFalsa();
+    await abrir(tester);
+    expect(find.text('0 %'), findsOneWidget);
+    expect(find.text('-50 ms'), findsOneWidget);
+    expect(voz.nivel, 0);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('la sincronía corre la palabra resaltada', (tester) async {
+    await abrir(tester);
+    await tester.tap(find.byKey(const Key('botonReproducir')));
+    await tester.pump();
+    instrumental.posicion = const Duration(milliseconds: 4800);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(cantado(tester), 'cantando bajo ');
+
+    // Con −200 ms la letra se resalta más tarde: «bajo» todavía no empieza
+    for (int i = 0; i < 4; i++) {
+      await tester.tap(find.byTooltip('Bajar Sincronía'));
+    }
+    await tester.pump();
+    expect(find.text('-200 ms'), findsOneWidget);
+    expect(cantado(tester), 'cantando ');
+    await tester.tap(find.byKey(const Key('botonReproducir')));
     await tester.pumpWidget(const SizedBox());
   });
 
