@@ -90,16 +90,16 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
           _semitonos = configuracion.semitonos;
         });
       }
-      final Letra letra = await widget.cliente.obtenerLetra(id);
-      final List<String> rutas = await Future.wait(<Future<String>>[
+      // La letra y las dos pistas se piden a la vez, y cada pista se carga
+      // en el reproductor en cuanto termina de descargarse
+      final Future<Letra> pedirLetra = widget.cliente.obtenerLetra(id);
+      final Future<void> cargarPistas = _reproductor.cargar(<Future<String>>[
         widget.cliente.obtenerPista(id, 'instrumental'),
         widget.cliente.obtenerPista(id, 'voz'),
-      ]);
-      await _reproductor.cargar(
-        rutas,
-        letra: letra,
-        configuracion: configuracion,
-      );
+      ], configuracion: configuracion);
+      final Letra letra = await pedirLetra;
+      await cargarPistas;
+      _reproductor.letra = letra;
       if (!mounted) return;
       setState(() {
         _cargada = true;
