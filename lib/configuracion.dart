@@ -1,10 +1,13 @@
 /// Configuración de la aplicación.
+///
+/// Los valores se leen del archivo `.env` al ejecutar o compilar con
+/// `--dart-define-from-file=.env` (ver `.env.example`).
 library;
 
 /// URL base de la API REST.
 ///
-/// Se define al compilar con `--dart-define=API_URL=https://...`. Por
-/// defecto apunta al servidor local visto desde el emulador de Android.
+/// Variable `API_URL`. Por defecto apunta al servidor local visto desde el
+/// emulador de Android.
 const String urlApi = String.fromEnvironment(
   'API_URL',
   defaultValue: 'http://10.0.2.2:8000',
@@ -12,7 +15,7 @@ const String urlApi = String.fromEnvironment(
 
 /// Dirección de la plataforma web, donde se registran las cuentas.
 ///
-/// Se define al compilar con `--dart-define=WEB_URL=https://...`.
+/// Variable `WEB_URL`.
 const String urlWeb = String.fromEnvironment(
   'WEB_URL',
   defaultValue: 'http://localhost:5173',

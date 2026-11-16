@@ -1,9 +1,9 @@
 // Prueba de la aplicación completa contra el servidor real (Sp-23).
 //
 // Se ejecuta en el celular de pruebas (o en otro dispositivo) con:
-//   flutter test integration_test --dart-define=API_URL=https://...
-//     --dart-define=PRUEBA_EMAIL=... --dart-define=PRUEBA_CLAVE=...
-// La cuenta debe tener al menos una canción terminada.
+//   flutter test integration_test --dart-define-from-file=.env
+// La cuenta PRUEBA_EMAIL/PRUEBA_CLAVE debe tener al menos una canción
+// terminada.
 import 'package:final_mobile_project/app.dart';
 import 'package:final_mobile_project/servicios/cliente_api.dart';
 import 'package:flutter/material.dart';
