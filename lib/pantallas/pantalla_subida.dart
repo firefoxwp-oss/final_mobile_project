@@ -1,46 +1,19 @@
 import 'package:flutter/material.dart';
 
 import '../servicios/cliente_api.dart';
-
-/// Video elegido para subir, con los datos que se muestran en su tarjeta.
-class VideoElegido {
-  /// Crea el video elegido.
-  const VideoElegido({
-    required this.ruta,
-    required this.nombre,
-    required this.bytes,
-    this.duracion,
-  });
-
-  /// Ruta del archivo en el celular.
-  final String ruta;
-
-  /// Nombre del archivo.
-  final String nombre;
-
-  /// Tamaño en bytes.
-  final int bytes;
-
-  /// Duración, si se pudo leer.
-  final Duration? duracion;
-
-  /// Texto «3:52 · 48 MB» de la tarjeta.
-  String get detalle {
-    final String tamano = '${(bytes / (1024 * 1024)).toStringAsFixed(0)} MB';
-    final Duration? d = duracion;
-    if (d == null) return tamano;
-    final String segundos = (d.inSeconds % 60).toString().padLeft(2, '0');
-    return '${d.inMinutes}:$segundos · $tamano';
-  }
-}
+import '../servicios/selector_video.dart';
 
 /// Subida de un video desde el celular y su progreso (Pb-9).
 class PantallaSubida extends StatefulWidget {
-  /// Crea la pantalla «Subir canción».
-  const PantallaSubida({required this.cliente, super.key});
+  /// Crea la pantalla «Subir canción»; [selector] permite reemplazar la
+  /// galería y la cámara en las pruebas.
+  const PantallaSubida({required this.cliente, this.selector, super.key});
 
   /// Cliente de la API.
   final ClienteApi cliente;
+
+  /// Origen del video; por defecto, los archivos y la cámara del celular.
+  final SelectorVideo? selector;
 
   @override
   State<PantallaSubida> createState() => _PantallaSubidaState();
@@ -51,6 +24,27 @@ class _PantallaSubidaState extends State<PantallaSubida> {
   String _tipo = 'karaoke';
   double? _avance;
   String? _error;
+
+  late final SelectorVideo _selector =
+      widget.selector ?? SelectorVideoDispositivo();
+
+  /// elegirVideo(galería o cámara) y validar(archivo), según la secuencia
+  /// de Pb-9: un archivo no válido se rechaza antes de subirlo.
+  Future<void> _elegir(Future<VideoElegido?> Function() origen) async {
+    final VideoElegido? video;
+    try {
+      video = await origen();
+    } on Object {
+      if (mounted) setState(() => _error = 'No se pudo abrir el archivo.');
+      return;
+    }
+    if (video == null || !mounted) return;
+    final VideoElegido elegido = video;
+    setState(() {
+      _video = elegido;
+      _error = validarVideo(elegido);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +64,7 @@ class _PantallaSubidaState extends State<PantallaSubida> {
               Expanded(
                 child: OutlinedButton.icon(
                   key: const Key('botonGaleria'),
-                  onPressed: null,
+                  onPressed: () => _elegir(_selector.elegirDeGaleria),
                   icon: const Icon(Icons.photo_library_outlined),
                   label: const Text('Galería'),
                 ),
@@ -79,7 +73,7 @@ class _PantallaSubidaState extends State<PantallaSubida> {
               Expanded(
                 child: OutlinedButton.icon(
                   key: const Key('botonCamara'),
-                  onPressed: null,
+                  onPressed: () => _elegir(_selector.grabarConCamara),
                   icon: const Icon(Icons.videocam_outlined),
                   label: const Text('Cámara'),
                 ),
