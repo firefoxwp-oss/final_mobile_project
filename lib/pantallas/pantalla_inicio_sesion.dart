@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../configuracion.dart';
+import '../servicios/cliente_api.dart';
+import 'pantalla_canciones.dart';
 
 /// Expresión simple para validar el formato del correo electrónico.
 final RegExp _formatoCorreo = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
@@ -11,8 +13,11 @@ final RegExp _formatoCorreo = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 /// Sigue el prototipo del documento: logo, campos de correo y contraseña,
 /// botón «Ingresar» y enlace para registrarse en la web.
 class PantallaInicioSesion extends StatefulWidget {
-  /// Crea la pantalla de inicio de sesión.
-  const PantallaInicioSesion({super.key});
+  /// Crea la pantalla de inicio de sesión con el [cliente] de la API.
+  const PantallaInicioSesion({required this.cliente, super.key});
+
+  /// Cliente de la API.
+  final ClienteApi cliente;
 
   @override
   State<PantallaInicioSesion> createState() => _PantallaInicioSesionState();
@@ -22,6 +27,8 @@ class _PantallaInicioSesionState extends State<PantallaInicioSesion> {
   final GlobalKey<FormState> _formulario = GlobalKey<FormState>();
   final TextEditingController _correo = TextEditingController();
   final TextEditingController _clave = TextEditingController();
+  bool _ingresando = false;
+  String? _error;
 
   @override
   void dispose() {
@@ -30,8 +37,25 @@ class _PantallaInicioSesionState extends State<PantallaInicioSesion> {
     super.dispose();
   }
 
-  void _ingresar() {
-    _formulario.currentState!.validate();
+  Future<void> _ingresar() async {
+    if (!_formulario.currentState!.validate()) return;
+    setState(() {
+      _ingresando = true;
+      _error = null;
+    });
+    try {
+      await widget.cliente.iniciarSesion(_correo.text, _clave.text);
+      if (!mounted) return;
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => PantallaCanciones(cliente: widget.cliente),
+        ),
+      );
+    } on ErrorApi catch (e) {
+      if (mounted) setState(() => _error = e.mensaje);
+    } finally {
+      if (mounted) setState(() => _ingresando = false);
+    }
   }
 
   Future<void> _abrirRegistro() async {
@@ -115,24 +139,41 @@ class _PantallaInicioSesionState extends State<PantallaInicioSesion> {
                     validator: (String? valor) =>
                         (valor ?? '').isEmpty ? 'Ingresa tu contraseña' : null,
                   ),
+                  if (_error != null) ...<Widget>[
+                    const SizedBox(height: 16),
+                    Text(
+                      _error!,
+                      key: const Key('mensajeError'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: tema.colorScheme.error),
+                    ),
+                  ],
                   const SizedBox(height: 32),
                   SizedBox(
                     height: 52,
                     child: FilledButton(
                       key: const Key('botonIngresar'),
-                      onPressed: _ingresar,
+                      onPressed: _ingresando ? null : _ingresar,
                       style: FilledButton.styleFrom(
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: const Text(
-                        'Ingresar',
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      child: _ingresando
+                          ? const SizedBox.square(
+                              dimension: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'Ingresar',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
                   const SizedBox(height: 24),
