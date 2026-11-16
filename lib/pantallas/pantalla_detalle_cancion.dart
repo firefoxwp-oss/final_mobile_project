@@ -1,11 +1,20 @@
 import 'package:flutter/material.dart';
 
 import '../servicios/cancion.dart';
+import '../servicios/cliente_api.dart';
+import 'pantalla_karaoke.dart';
 
 /// Detalle de una canción terminada (Pb-8).
 class PantallaDetalleCancion extends StatelessWidget {
   /// Crea el detalle de la [cancion].
-  const PantallaDetalleCancion({required this.cancion, super.key});
+  const PantallaDetalleCancion({
+    required this.cliente,
+    required this.cancion,
+    super.key,
+  });
+
+  /// Cliente de la API, para el Modo Karaoke.
+  final ClienteApi cliente;
 
   /// Canción terminada que se muestra.
   final Cancion cancion;
@@ -71,6 +80,24 @@ class PantallaDetalleCancion extends StatelessWidget {
             etiqueta: 'Archivo original',
             valor: cancion.nombreArchivo,
           ),
+          // El Modo Karaoke se abre solo para las canciones de tipo karaoke
+          if (cancion.tipoVideo == 'karaoke') ...<Widget>[
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              key: const Key('botonCantar'),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      PantallaKaraoke(cliente: cliente, cancion: cancion),
+                ),
+              ),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+              ),
+              icon: const Icon(Icons.mic),
+              label: const Text('Cantar'),
+            ),
+          ],
         ],
       ),
     );
