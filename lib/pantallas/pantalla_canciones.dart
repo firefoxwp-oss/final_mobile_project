@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../servicios/cancion.dart';
 import '../servicios/cliente_api.dart';
+import 'pantalla_detalle_cancion.dart';
 import 'pantalla_inicio_sesion.dart';
 
 /// Lista de las canciones procesadas del usuario (Pb-8).
@@ -17,17 +20,58 @@ class PantallaCanciones extends StatefulWidget {
 }
 
 class _PantallaCancionesState extends State<PantallaCanciones> {
-  final List<Cancion> _canciones = <Cancion>[];
+  List<Cancion>? _canciones;
+  String? _error;
 
-  Future<void> _cerrarSesion() async {
-    await widget.cliente.cerrarSesion();
-    if (!mounted) return;
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_cargar());
+  }
+
+  /// Consulta las canciones del usuario en el servidor.
+  Future<void> _cargar() async {
+    try {
+      final List<Cancion> canciones = await widget.cliente.listarCanciones();
+      if (!mounted) return;
+      setState(() {
+        _canciones = canciones;
+        _error = null;
+      });
+    } on ErrorApi catch (e) {
+      if (!mounted) return;
+      if (e.sesionVencida) {
+        await _irAlInicioDeSesion();
+        return;
+      }
+      setState(() => _error = e.mensaje);
+    } on Object {
+      // Respuesta inesperada del servidor
+      if (mounted) {
+        setState(() => _error = 'No se pudieron cargar las canciones');
+      }
+    }
+  }
+
+  Future<void> _abrir(Cancion cancion) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => PantallaDetalleCancion(cancion: cancion),
+    ),
+  );
+
+  Future<void> _irAlInicioDeSesion() async {
     await Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(
         builder: (_) => PantallaInicioSesion(cliente: widget.cliente),
       ),
       (_) => false,
     );
+  }
+
+  Future<void> _cerrarSesion() async {
+    await widget.cliente.cerrarSesion();
+    if (!mounted) return;
+    await _irAlInicioDeSesion();
   }
 
   @override
@@ -46,18 +90,54 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: <Widget>[
-          for (final Cancion cancion in _canciones)
-            TarjetaCancion(cancion: cancion),
-          const SizedBox(height: 24),
-          Text(
-            'Solo las canciones terminadas se pueden abrir',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: tema.colorScheme.onSurfaceVariant),
-          ),
-        ],
+      body: _canciones == null && _error == null
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _cargar,
+              child: ListView(
+                // Permite deslizar para actualizar aunque la lista sea corta
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                children: <Widget>[
+                  if (_error != null)
+                    _Aviso(texto: _error!, color: tema.colorScheme.error),
+                  if (_canciones?.isEmpty ?? false)
+                    const _Aviso(
+                      texto:
+                          'Todavía no tienes canciones. Súbelas desde la web.',
+                    ),
+                  for (final Cancion cancion in _canciones ?? <Cancion>[])
+                    TarjetaCancion(
+                      cancion: cancion,
+                      alTocar: () => _abrir(cancion),
+                    ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Solo las canciones terminadas se pueden abrir',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: tema.colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+class _Aviso extends StatelessWidget {
+  const _Aviso({required this.texto, this.color});
+
+  final String texto;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 32),
+      child: Text(
+        texto,
+        textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 16, color: color),
       ),
     );
   }

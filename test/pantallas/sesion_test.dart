@@ -13,6 +13,7 @@ import 'package:http/testing.dart';
 ClienteApi _cliente() => ClienteApi(
   url: 'https://api.prueba',
   cliente: MockClient((http.Request peticion) async {
+    if (peticion.url.path == '/jobs') return http.Response('[]', 200);
     if (peticion.url.path == '/login') {
       final Map<String, dynamic> datos =
           jsonDecode(peticion.body) as Map<String, dynamic>;

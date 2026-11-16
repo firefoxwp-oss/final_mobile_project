@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../configuracion.dart';
 import 'almacen_sesion.dart';
+import 'cancion.dart';
 
 /// Error de la API con un mensaje comprensible para el usuario.
 class ErrorApi implements Exception {
@@ -118,6 +119,15 @@ class ClienteApi {
     }
     _comprobar(respuesta);
     return jsonDecode(utf8.decode(respuesta.bodyBytes));
+  }
+
+  /// Canciones del usuario, de la más reciente a la más antigua.
+  Future<List<Cancion>> listarCanciones() async {
+    final List<dynamic> trabajos = await obtener('/jobs') as List<dynamic>;
+    return <Cancion>[
+      for (final dynamic trabajo in trabajos)
+        Cancion.desdeJson(trabajo as Map<String, dynamic>),
+    ];
   }
 
   /// Cierra la sesión y borra los tokens del dispositivo.
