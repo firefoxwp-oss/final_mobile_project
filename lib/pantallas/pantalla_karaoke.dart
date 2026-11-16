@@ -1,12 +1,16 @@
 import 'dart:async';
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../datos/configuracion_karaoke.dart';
 import '../datos/grabacion.dart';
 import '../servicios/cancion.dart';
 import '../servicios/cliente_api.dart';
+import '../servicios/grabador_voz.dart';
 import '../servicios/letra.dart';
 import '../servicios/reproductor_pistas.dart';
 
@@ -42,6 +46,8 @@ class PantallaKaraoke extends StatefulWidget {
     required this.cliente,
     required this.cancion,
     this.crearReproductor,
+    this.crearGrabador,
+    this.carpetaGrabaciones,
     super.key,
   });
 
@@ -54,6 +60,13 @@ class PantallaKaraoke extends StatefulWidget {
   /// Crea el reproductor del instrumental y la voz guía; en las pruebas se
   /// reemplaza por uno simulado.
   final ReproductorPistas Function()? crearReproductor;
+
+  /// Crea el grabador del micrófono; en las pruebas se reemplaza.
+  final GrabadorVoz Function()? crearGrabador;
+
+  /// Carpeta de las grabaciones; por defecto, la de documentos de la
+  /// aplicación.
+  final Future<Directory> Function()? carpetaGrabaciones;
 
   @override
   State<PantallaKaraoke> createState() => _PantallaKaraokeState();
@@ -81,8 +94,13 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
   int _semitonos = 0;
   int _desfaseMs = 0;
   bool _cambiandoTono = false;
-  final EstadoGrabacion _grabacion = EstadoGrabacion.ninguna;
-  final Duration _tiempoGrabado = Duration.zero;
+  late final GrabadorVoz _grabador =
+      widget.crearGrabador?.call() ?? GrabadorDispositivo();
+  EstadoGrabacion _grabacion = EstadoGrabacion.ninguna;
+  Duration _tiempoGrabado = Duration.zero;
+  String? _rutaVoz;
+
+  bool get _grabando => _grabacion == EstadoGrabacion.grabando;
 
   bool get _sonando => _reproductor.sonando;
 
@@ -143,6 +161,72 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
     if (mounted) setState(() {});
   }
 
+  /// grabar(): pide el permiso del micrófono y, si se concede, graba la voz
+  /// mientras suena la canción desde el inicio (secuencia de Pb-13).
+  Future<void> _grabar() async {
+    if (!await _grabador.pedirPermisoMicrofono()) {
+      if (mounted) await _explicarPermiso();
+      return;
+    }
+    if (_sonando) await _alternar();
+    await _descartar();
+    final Directory documentos =
+        await (widget.carpetaGrabaciones ?? getApplicationDocumentsDirectory)();
+    final Directory carpeta = Directory('${documentos.path}/grabaciones');
+    await carpeta.create(recursive: true);
+    final String ruta =
+        '${carpeta.path}/voz_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await _reproductor.buscar(Duration.zero);
+    await _grabador.iniciar(ruta);
+    setState(() {
+      _grabacion = EstadoGrabacion.grabando;
+      _tiempoGrabado = Duration.zero;
+      _rutaVoz = ruta;
+    });
+    await _alternar();
+  }
+
+  /// detener(): termina la grabación y pausa la canción.
+  Future<void> _detener() async {
+    if (!_grabando) return;
+    final String? ruta = await _grabador.detener();
+    if (_sonando) await _alternar();
+    if (!mounted) return;
+    setState(() {
+      _grabacion = ruta == null
+          ? EstadoGrabacion.ninguna
+          : EstadoGrabacion.terminada;
+      _rutaVoz = ruta;
+    });
+  }
+
+  /// Descarta la grabación terminada y borra su archivo.
+  Future<void> _descartar() async {
+    final String? ruta = _rutaVoz;
+    _rutaVoz = null;
+    if (ruta != null && await File(ruta).exists()) await File(ruta).delete();
+    if (mounted) setState(() => _grabacion = EstadoGrabacion.ninguna);
+  }
+
+  /// Sin el permiso del micrófono no se graba: se explica cómo concederlo.
+  Future<void> _explicarPermiso() => showDialog<void>(
+    context: context,
+    builder: (BuildContext contexto) => AlertDialog(
+      key: const Key('dialogoPermiso'),
+      title: const Text('Se necesita el micrófono'),
+      content: const Text(
+        'Para grabar tu voz, permite el uso del micrófono en Ajustes → '
+        'Aplicaciones → Karaoke → Permisos → Micrófono.',
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(contexto).pop(),
+          child: const Text('Entendido'),
+        ),
+      ],
+    ),
+  );
+
   /// La pantalla no se apaga mientras suena la canción; si el sistema no lo
   /// permite, la canción sigue sonando igual.
   Future<void> _mantenerPantalla({required bool encendida}) async {
@@ -160,9 +244,10 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
       unawaited(_reproductor.sincronizar());
     }
     if (_duracion > Duration.zero && posicion >= _duracion) {
-      unawaited(_alternar());
+      unawaited(_grabando ? _detener() : _alternar());
       return;
     }
+    if (_grabando) _tiempoGrabado = posicion;
     final LetraResaltada letra = _reproductor.resaltarPalabra(posicion);
     // La barra avanza cada 250 ms; la letra, en cuanto cambia una palabra
     if (letra != _letra ||
@@ -246,6 +331,8 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
   @override
   void dispose() {
     _reloj?.cancel();
+    if (_grabando) unawaited(_grabador.detener());
+    unawaited(_grabador.liberar());
     unawaited(_mantenerPantalla(encendida: false));
     unawaited(_reproductor.liberar());
     super.dispose();
@@ -302,7 +389,7 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
               IconButton.filled(
                 key: const Key('botonReproducir'),
                 tooltip: _sonando ? 'Pausar' : 'Reproducir',
-                onPressed: _cargada ? _alternar : null,
+                onPressed: _cargada && !_grabando ? _alternar : null,
                 icon: Icon(_sonando ? Icons.pause : Icons.play_arrow),
               ),
               const SizedBox(width: 8),
@@ -314,13 +401,13 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
                       .toDouble()
                       .clamp(0, total),
                   max: total == 0 ? 1 : total,
-                  onChanged: _cargada
+                  onChanged: _cargada && !_grabando
                       ? (double valor) => setState(
                           () =>
                               _arrastre = Duration(milliseconds: valor.round()),
                         )
                       : null,
-                  onChangeEnd: _cargada ? _mover : null,
+                  onChangeEnd: _cargada && !_grabando ? _mover : null,
                 ),
               ),
               Text(formatoTiempo(_duracion)),
@@ -359,10 +446,18 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
             valor: _semitonos == 0
                 ? 'Original'
                 : (_semitonos > 0 ? '+$_semitonos' : '−${-_semitonos}'),
-            alBajar: _cargada && !_cambiandoTono && _semitonos > tonoMinimo
+            alBajar:
+                _cargada &&
+                    !_cambiandoTono &&
+                    !_grabando &&
+                    _semitonos > tonoMinimo
                 ? () => _cambiarTono(_semitonos - 1)
                 : null,
-            alSubir: _cargada && !_cambiandoTono && _semitonos < tonoMaximo
+            alSubir:
+                _cargada &&
+                    !_cambiandoTono &&
+                    !_grabando &&
+                    _semitonos < tonoMaximo
                 ? () => _cambiarTono(_semitonos + 1)
                 : null,
           ),
@@ -394,7 +489,7 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
             const SizedBox(height: 12),
             FilledButton.icon(
               key: const Key('botonDetener'),
-              onPressed: null,
+              onPressed: _detener,
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(52),
               ),
@@ -404,7 +499,7 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
           ] else
             FilledButton.icon(
               key: const Key('botonGrabar'),
-              onPressed: null,
+              onPressed: _cargada && !_cambiandoTono ? _grabar : null,
               style: FilledButton.styleFrom(
                 backgroundColor: tema.colorScheme.error,
                 minimumSize: const Size.fromHeight(52),
@@ -417,6 +512,7 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
             ResultadoGrabacion(
               titulo: widget.cancion.titulo,
               duracion: _tiempoGrabado,
+              alDescartar: _descartar,
             ),
           ],
           const SizedBox(height: 24),
@@ -500,6 +596,9 @@ class ResultadoGrabacion extends StatelessWidget {
   /// Acción del botón Guardar.
   final VoidCallback? alGuardar;
 
+  /// Relleno corto: los tres botones caben en una línea en el celular.
+  static const EdgeInsets _relleno = EdgeInsets.symmetric(horizontal: 4);
+
   @override
   Widget build(BuildContext context) {
     final ThemeData tema = Theme.of(context);
@@ -528,6 +627,7 @@ class ResultadoGrabacion extends StatelessWidget {
               children: <Widget>[
                 Expanded(
                   child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(padding: _relleno),
                     onPressed: alEscuchar,
                     child: const Text('Escuchar'),
                   ),
@@ -535,6 +635,7 @@ class ResultadoGrabacion extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(padding: _relleno),
                     onPressed: alDescartar,
                     child: const Text('Descartar'),
                   ),
@@ -542,6 +643,7 @@ class ResultadoGrabacion extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton(
+                    style: FilledButton.styleFrom(padding: _relleno),
                     onPressed: alGuardar,
                     child: const Text('Guardar'),
                   ),
