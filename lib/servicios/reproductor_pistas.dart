@@ -83,9 +83,9 @@ class ReproductorPistas {
   /// Pistas que suenan juntas.
   final List<PistaAudio> pistas;
 
-  /// Separación máxima entre pistas antes de corregirla; queda dentro del
+  /// Separación máxima entre pistas antes de corregirla: la mitad del
   /// desfase de 100 ms que se admite para la letra (RR-07).
-  static const Duration tolerancia = Duration(milliseconds: 40);
+  static const Duration tolerancia = Duration(milliseconds: 50);
 
   /// Separación a partir de la cual una pista se considera alineada.
   static const Duration alineada = Duration(milliseconds: 10);
@@ -94,9 +94,22 @@ class ReproductorPistas {
   /// tardaría demasiado.
   static const Duration salto = Duration(seconds: 2);
 
-  /// Cambio de velocidad para corregir la separación; no altera el tono,
-  /// porque Android lo conserva al cambiar la velocidad.
-  static const double ajuste = 0.08;
+  /// Tiempo en que se busca corregir cualquier separación.
+  static const Duration correccion = Duration(seconds: 2);
+
+  /// Límites del cambio de velocidad para corregir la separación; no altera
+  /// el tono, porque Android lo conserva al cambiar la velocidad.
+  static const double ajusteMinimo = 0.04;
+
+  /// Límites del cambio de velocidad para corregir la separación.
+  static const double ajusteMaximo = 0.2;
+
+  /// Cambio de velocidad que corrige [diferencia] en [correccion].
+  static double ajuste(Duration diferencia) =>
+      (diferencia.inMicroseconds.abs() / correccion.inMicroseconds).clamp(
+        ajusteMinimo,
+        ajusteMaximo,
+      );
 
   /// Duración de la canción, conocida al cargarla.
   Duration? duracion;
@@ -169,7 +182,8 @@ class ReproductorPistas {
       final double actual = _velocidades[pista] ?? 1;
       double nueva = actual;
       if (diferencia.abs() > tolerancia) {
-        nueva = diferencia.isNegative ? 1 + ajuste : 1 - ajuste;
+        final double cambio = ajuste(diferencia);
+        nueva = diferencia.isNegative ? 1 + cambio : 1 - cambio;
       } else if (diferencia.abs() <= alineada) {
         nueva = 1;
       }
