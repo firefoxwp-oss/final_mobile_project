@@ -7,6 +7,7 @@ import '../servicios/cliente_api.dart';
 import '../servicios/servicio_notificaciones.dart';
 import 'pantalla_detalle_cancion.dart';
 import 'pantalla_inicio_sesion.dart';
+import 'pantalla_subida.dart';
 
 /// Lista de las canciones procesadas del usuario (Pb-8).
 class PantallaCanciones extends StatefulWidget {
@@ -79,6 +80,16 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
     );
   }
 
+  /// Abre «Subir canción» y, al volver, actualiza la lista (Pb-9).
+  Future<void> _subir() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PantallaSubida(cliente: widget.cliente),
+      ),
+    );
+    await _cargar();
+  }
+
   Future<void> _cerrarSesion() async {
     await widget.notificaciones?.cerrarSesion();
     await widget.cliente.cerrarSesion();
@@ -102,6 +113,12 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        key: const Key('botonSubir'),
+        onPressed: _subir,
+        icon: const Icon(Icons.upload),
+        label: const Text('Subir canción'),
+      ),
       body: _canciones == null && _error == null
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -116,7 +133,8 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
                   if (_canciones?.isEmpty ?? false)
                     const _Aviso(
                       texto:
-                          'Todavía no tienes canciones. Súbelas desde la web.',
+                          'Todavía no tienes canciones. Sube una con el botón '
+                          '«Subir canción».',
                     ),
                   for (final Cancion cancion in _canciones ?? <Cancion>[])
                     TarjetaCancion(
@@ -129,6 +147,7 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
                     textAlign: TextAlign.center,
                     style: TextStyle(color: tema.colorScheme.onSurfaceVariant),
                   ),
+                  const SizedBox(height: 72),
                 ],
               ),
             ),

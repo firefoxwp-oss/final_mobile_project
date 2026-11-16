@@ -114,7 +114,9 @@ void main() {
     await _abrirApp(tester, _cliente(() => <Map<String, dynamic>>[]));
 
     expect(
-      find.text('Todavía no tienes canciones. Súbelas desde la web.'),
+      find.text(
+        'Todavía no tienes canciones. Sube una con el botón «Subir canción».',
+      ),
       findsOneWidget,
     );
   });
