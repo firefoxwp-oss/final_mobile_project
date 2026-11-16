@@ -4,16 +4,24 @@ import 'package:flutter/material.dart';
 
 import '../servicios/cancion.dart';
 import '../servicios/cliente_api.dart';
+import '../servicios/servicio_notificaciones.dart';
 import 'pantalla_detalle_cancion.dart';
 import 'pantalla_inicio_sesion.dart';
 
 /// Lista de las canciones procesadas del usuario (Pb-8).
 class PantallaCanciones extends StatefulWidget {
   /// Crea la pantalla «Mis canciones».
-  const PantallaCanciones({required this.cliente, super.key});
+  const PantallaCanciones({
+    required this.cliente,
+    this.notificaciones,
+    super.key,
+  });
 
   /// Cliente de la API.
   final ClienteApi cliente;
+
+  /// Notificaciones de finalización, que se desactivan al cerrar sesión.
+  final ServicioNotificaciones? notificaciones;
 
   @override
   State<PantallaCanciones> createState() => _PantallaCancionesState();
@@ -62,13 +70,17 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
   Future<void> _irAlInicioDeSesion() async {
     await Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(
-        builder: (_) => PantallaInicioSesion(cliente: widget.cliente),
+        builder: (_) => PantallaInicioSesion(
+          cliente: widget.cliente,
+          notificaciones: widget.notificaciones,
+        ),
       ),
       (_) => false,
     );
   }
 
   Future<void> _cerrarSesion() async {
+    await widget.notificaciones?.cerrarSesion();
     await widget.cliente.cerrarSesion();
     if (!mounted) return;
     await _irAlInicioDeSesion();

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../configuracion.dart';
 import '../servicios/cliente_api.dart';
+import '../servicios/servicio_notificaciones.dart';
 import 'pantalla_canciones.dart';
 
 /// Expresión simple para validar el formato del correo electrónico.
@@ -14,10 +17,17 @@ final RegExp _formatoCorreo = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 /// botón «Ingresar» y enlace para registrarse en la web.
 class PantallaInicioSesion extends StatefulWidget {
   /// Crea la pantalla de inicio de sesión con el [cliente] de la API.
-  const PantallaInicioSesion({required this.cliente, super.key});
+  const PantallaInicioSesion({
+    required this.cliente,
+    this.notificaciones,
+    super.key,
+  });
 
   /// Cliente de la API.
   final ClienteApi cliente;
+
+  /// Notificaciones de finalización, que se activan al iniciar sesión.
+  final ServicioNotificaciones? notificaciones;
 
   @override
   State<PantallaInicioSesion> createState() => _PantallaInicioSesionState();
@@ -45,10 +55,14 @@ class _PantallaInicioSesionState extends State<PantallaInicioSesion> {
     });
     try {
       await widget.cliente.iniciarSesion(_correo.text, _clave.text);
+      unawaited(widget.notificaciones?.iniciarSesion());
       if (!mounted) return;
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
-          builder: (_) => PantallaCanciones(cliente: widget.cliente),
+          builder: (_) => PantallaCanciones(
+            cliente: widget.cliente,
+            notificaciones: widget.notificaciones,
+          ),
         ),
       );
     } on ErrorApi catch (e) {

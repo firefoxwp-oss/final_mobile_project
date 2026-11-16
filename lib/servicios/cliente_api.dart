@@ -107,17 +107,7 @@ class ClienteApi {
   ///
   /// Si el token de acceso venció, lo renueva y repite la petición una vez.
   Future<Object?> obtener(String ruta) async {
-    http.Response respuesta = await _obtenerConToken(ruta);
-    if (respuesta.statusCode == 401) {
-      if (!await renovarSesion()) {
-        throw const ErrorApi(
-          'Tu sesión venció. Vuelve a iniciar sesión.',
-          sesionVencida: true,
-        );
-      }
-      respuesta = await _obtenerConToken(ruta);
-    }
-    _comprobar(respuesta);
+    final http.Response respuesta = await _conToken('GET', ruta);
     return jsonDecode(utf8.decode(respuesta.bodyBytes));
   }
 
@@ -130,20 +120,63 @@ class ClienteApi {
     ];
   }
 
+  /// Registra el celular para recibir las notificaciones de finalización.
+  Future<void> registrarDispositivo(String token) async {
+    await _conToken(
+      'POST',
+      '/dispositivos',
+      cuerpo: <String, String>{'token': token, 'platform': 'android'},
+    );
+  }
+
+  /// Elimina el celular al cerrar sesión: deja de recibir notificaciones.
+  Future<void> eliminarDispositivo(String token) async {
+    await _conToken('DELETE', '/dispositivos/${Uri.encodeComponent(token)}');
+  }
+
   /// Cierra la sesión y borra los tokens del dispositivo.
   Future<void> cerrarSesion() => almacen.borrar();
 
   /// Libera la conexión HTTP.
   void cerrar() => _cliente.close();
 
-  Future<http.Response> _obtenerConToken(String ruta) async {
+  /// Petición protegida a una [ruta]; si el token de acceso venció, lo
+  /// renueva y repite la petición una vez.
+  Future<http.Response> _conToken(
+    String metodo,
+    String ruta, {
+    Object? cuerpo,
+  }) async {
+    http.Response respuesta = await _peticion(metodo, ruta, cuerpo);
+    if (respuesta.statusCode == 401) {
+      if (!await renovarSesion()) {
+        throw const ErrorApi(
+          'Tu sesión venció. Vuelve a iniciar sesión.',
+          sesionVencida: true,
+        );
+      }
+      respuesta = await _peticion(metodo, ruta, cuerpo);
+    }
+    _comprobar(respuesta);
+    return respuesta;
+  }
+
+  Future<http.Response> _peticion(
+    String metodo,
+    String ruta,
+    Object? cuerpo,
+  ) async {
     final String? acceso = await almacen.leerTokenAcceso();
-    return _enviar(
-      () => _cliente.get(
-        uri(ruta),
-        headers: <String, String>{'Authorization': 'Bearer $acceso'},
-      ),
-    );
+    final Map<String, String> cabeceras = <String, String>{
+      'Authorization': 'Bearer $acceso',
+      if (cuerpo != null) ..._json,
+    };
+    return _enviar(() async {
+      final http.Request peticion = http.Request(metodo, uri(ruta))
+        ..headers.addAll(cabeceras);
+      if (cuerpo != null) peticion.body = jsonEncode(cuerpo);
+      return http.Response.fromStream(await _cliente.send(peticion));
+    });
   }
 
   Future<http.Response> _enviar(
