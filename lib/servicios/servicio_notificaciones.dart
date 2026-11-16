@@ -82,7 +82,8 @@ class ServicioNotificaciones {
     try {
       await _cancelarSuscripciones();
       await mostrador.preparar();
-      await mensajeria.pedirPermiso();
+      // El celular se registra antes de pedir el permiso: el registro no debe
+      // esperar a que el usuario responda el diálogo de Android.
       _token = await mensajeria.obtenerToken();
       if (_token != null) await cliente.registrarDispositivo(_token!);
       _suscripciones
@@ -97,6 +98,12 @@ class ServicioNotificaciones {
       // Sin Firebase o sin conexión la aplicación sigue funcionando (RF-09)
       _token = null;
       _registrarError('registrar el celular', e);
+      return;
+    }
+    try {
+      await mensajeria.pedirPermiso();
+    } on Object catch (e) {
+      _registrarError('pedir el permiso de notificaciones', e);
     }
   }
 
