@@ -71,7 +71,8 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
 
   Future<void> _abrir(Cancion cancion) => Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (_) => PantallaDetalleCancion(cancion: cancion),
+      builder: (_) =>
+          PantallaDetalleCancion(cliente: widget.cliente, cancion: cancion),
     ),
   );
 

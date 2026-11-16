@@ -3,13 +3,16 @@ import 'dart:convert';
 
 import 'package:final_mobile_project/app.dart';
 import 'package:final_mobile_project/pantallas/pantalla_detalle_cancion.dart';
+import 'package:final_mobile_project/pantallas/pantalla_karaoke.dart';
 import 'package:final_mobile_project/servicios/almacen_sesion.dart';
 import 'package:final_mobile_project/servicios/cliente_api.dart';
 import 'package:final_mobile_project/servicios/servicio_notificaciones.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const String _tokens =
     '{"access_token":"a","refresh_token":"r","token_type":"bearer"}';
@@ -108,7 +111,10 @@ Future<void> _abrirApp(
 }
 
 void main() {
-  setUp(() => FlutterSecureStorage.setMockInitialValues(<String, String>{}));
+  setUp(() {
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
 
   final List<Map<String, dynamic>> tresCanciones = <Map<String, dynamic>>[
     _trabajo('3', 'queued', 'En espera.mp4'),
@@ -140,6 +146,41 @@ void main() {
     expect(find.text('Separación de la voz'), findsOneWidget);
     expect(find.text('Demucs v4'), findsOneWidget);
     expect(find.text('Karaoke'), findsOneWidget);
+  });
+
+  testWidgets('desde el detalle se abre el Modo Karaoke', (tester) async {
+    await _abrirApp(tester, _cliente(() => tresCanciones));
+    await tester.tap(find.text('Terminada'));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.byKey(const Key('botonCantar')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('botonCantar')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.byType(PantallaKaraoke), findsOneWidget);
+    expect(find.text('Modo Karaoke'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('una canción solo instrumental no tiene Modo Karaoke', (
+    tester,
+  ) async {
+    final Map<String, dynamic> instrumental = _trabajo(
+      '1',
+      'done',
+      'Terminada.mp4',
+    )..['video_type'] = 'instrumental';
+    await _abrirApp(
+      tester,
+      _cliente(() => <Map<String, dynamic>>[instrumental]),
+    );
+    await tester.tap(find.text('Terminada'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Instrumental'), findsOneWidget);
+    expect(find.byKey(const Key('botonCantar')), findsNothing);
   });
 
   testWidgets('las canciones no terminadas no se abren', (tester) async {
