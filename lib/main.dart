@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'app.dart';
+import 'servicios/cliente_api.dart';
 
 void main() {
-  runApp(const KaraokeApp());
+  runApp(KaraokeApp(cliente: ClienteApi()));
 }
