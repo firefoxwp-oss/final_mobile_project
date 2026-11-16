@@ -1,10 +1,12 @@
 // Prueba de la aplicación completa contra el servidor real (Sp-23).
 //
 // Se ejecuta en el celular de pruebas (o en otro dispositivo) con:
-//   flutter test integration_test --dart-define-from-file=.env
-// La cuenta PRUEBA_EMAIL/PRUEBA_CLAVE debe tener al menos una canción
-// terminada.
+//   flutter test integration_test --dart-define-from-file=.env.pruebas
+// La URL del servidor se toma del .env de la aplicación; la cuenta
+// (PRUEBA_EMAIL y PRUEBA_CLAVE, con al menos una canción terminada), de
+// .env.pruebas, que no se empaqueta con la aplicación.
 import 'package:final_mobile_project/app.dart';
+import 'package:final_mobile_project/configuracion.dart';
 import 'package:final_mobile_project/servicios/cliente_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,6 +24,7 @@ Future<void> _esperar(WidgetTester tester, Finder buscado) async {
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(cargarConfiguracion);
 
   testWidgets('inicio de sesión, lista, detalle y cierre de sesión', (
     tester,

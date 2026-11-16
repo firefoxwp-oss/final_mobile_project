@@ -1,22 +1,24 @@
 /// Configuración de la aplicación.
 ///
-/// Los valores se leen del archivo `.env` al ejecutar o compilar con
-/// `--dart-define-from-file=.env` (ver `.env.example`).
+/// Los valores se leen del archivo `.env` del proyecto, que se empaqueta con
+/// la aplicación y se carga al iniciarla (ver `.env.example`).
 library;
 
-/// URL base de la API REST.
-///
-/// Variable `API_URL`. Por defecto apunta al servidor local visto desde el
-/// emulador de Android.
-const String urlApi = String.fromEnvironment(
-  'API_URL',
-  defaultValue: 'http://10.0.2.2:8000',
-);
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-/// Dirección de la plataforma web, donde se registran las cuentas.
+/// Carga el archivo `.env`; se llama una vez al iniciar la aplicación.
+Future<void> cargarConfiguracion() => dotenv.load();
+
+String _valor(String nombre, String porDefecto) {
+  final String? valor = dotenv.isInitialized ? dotenv.maybeGet(nombre) : null;
+  return valor == null || valor.isEmpty ? porDefecto : valor;
+}
+
+/// URL base de la API REST (variable `API_URL`).
 ///
-/// Variable `WEB_URL`.
-const String urlWeb = String.fromEnvironment(
-  'WEB_URL',
-  defaultValue: 'http://localhost:5173',
-);
+/// Por defecto apunta al servidor local visto desde el emulador de Android.
+String get urlApi => _valor('API_URL', 'http://10.0.2.2:8000');
+
+/// Dirección de la plataforma web, donde se registran las cuentas (variable
+/// `WEB_URL`).
+String get urlWeb => _valor('WEB_URL', 'http://localhost:5173');

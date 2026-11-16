@@ -46,3 +46,4 @@ app.*.map.json
 
 # Variables de entorno (datos locales y sensibles)
 .env
+.env.pruebas
