@@ -11,10 +11,12 @@ import 'package:http/testing.dart';
 
 /// Firebase simulado: entrega un token fijo y permite emitir eventos.
 class _MensajeriaFalsa implements MensajeriaPush {
-  _MensajeriaFalsa({this.falla = false});
+  _MensajeriaFalsa({this.falla = false, this.inicial});
 
   final String token = 'token-del-celular';
   final bool falla;
+  final String? inicial;
+  final StreamController<String> tocadas = StreamController<String>();
   final StreamController<String> renovados = StreamController<String>();
   final StreamController<NotificacionRecibida> mensajes =
       StreamController<NotificacionRecibida>();
@@ -39,17 +41,34 @@ class _MensajeriaFalsa implements MensajeriaPush {
 
   @override
   Future<void> borrarToken() async => tokenBorrado = true;
+
+  @override
+  Stream<String> get cancionesTocadas => tocadas.stream;
+
+  @override
+  Future<String?> cancionAlAbrir() async => inicial;
 }
 
 class _MostradorFalso implements MostradorNotificaciones {
   final List<String> mostradas = <String>[];
+  final StreamController<String> tocadas = StreamController<String>();
 
   @override
   Future<void> preparar() async {}
 
   @override
-  Future<void> mostrar(int id, String titulo, String texto) async =>
-      mostradas.add('$titulo|$texto');
+  Future<void> mostrar(
+    int id,
+    String titulo,
+    String texto, {
+    String? cancion,
+  }) async => mostradas.add('$titulo|$texto|$cancion');
+
+  @override
+  Stream<String> get cancionesTocadas => tocadas.stream;
+
+  @override
+  Future<String?> cancionAlAbrir() async => null;
 }
 
 /// Servidor simulado que registra las peticiones de /dispositivos.
@@ -129,7 +148,7 @@ void main() {
     await pumpEventQueue();
 
     expect(mostrador.mostradas, <String>[
-      'Tu canción está lista|mi_cancion.mp4 ya se puede cantar',
+      'Tu canción está lista|mi_cancion.mp4 ya se puede cantar|abc',
     ]);
   });
 
@@ -161,5 +180,26 @@ void main() {
     await servicio.cerrarSesion();
 
     expect(servidor.peticiones, isEmpty);
+  });
+
+  test('al tocar una notificación se abre su canción', () async {
+    final _MensajeriaFalsa fcm = _MensajeriaFalsa(inicial: 'cerrada');
+    final _MostradorFalso mostrador = _MostradorFalso();
+    final ServicioNotificaciones servicio = ServicioNotificaciones(
+      cliente: _Servidor().cliente(),
+      mensajeria: fcm,
+      mostrador: mostrador,
+    );
+    final List<String> abiertas = <String>[];
+
+    await servicio.alTocarNotificacion(abiertas.add);
+    fcm.tocadas.add('segundo-plano');
+    mostrador.tocadas.add('abierta');
+    await pumpEventQueue();
+    servicio.quitarAlTocar(abiertas.add);
+    mostrador.tocadas.add('ignorada');
+    await pumpEventQueue();
+
+    expect(abiertas, <String>['cerrada', 'segundo-plano', 'abierta']);
   });
 }

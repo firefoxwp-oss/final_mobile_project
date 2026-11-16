@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:final_mobile_project/app.dart';
+import 'package:final_mobile_project/pantallas/pantalla_detalle_cancion.dart';
 import 'package:final_mobile_project/servicios/almacen_sesion.dart';
 import 'package:final_mobile_project/servicios/cliente_api.dart';
+import 'package:final_mobile_project/servicios/servicio_notificaciones.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -36,15 +39,71 @@ ClienteApi _cliente(
         utf8.encode(jsonEncode(trabajos())),
         estadoJobs,
       ),
+      '/jobs/1' => http.Response.bytes(
+        utf8.encode(jsonEncode(_trabajo('1', 'done', 'Terminada.mp4'))),
+        200,
+      ),
       '/refresh' => http.Response(_tokens, estadoRefresh),
       _ => http.Response(_tokens, 200),
     };
   }),
 );
 
-Future<void> _abrirApp(WidgetTester tester, ClienteApi cliente) async {
+/// Firebase simulado: el usuario toca la notificación con [tocadas].
+class _MensajeriaFalsa implements MensajeriaPush {
+  final StreamController<String> tocadas = StreamController<String>();
+
+  @override
+  Future<void> pedirPermiso() async {}
+
+  @override
+  Future<String?> obtenerToken() async => null;
+
+  @override
+  Stream<String> get tokensRenovados => const Stream<String>.empty();
+
+  @override
+  Stream<NotificacionRecibida> get notificacionesEnPrimerPlano =>
+      const Stream<NotificacionRecibida>.empty();
+
+  @override
+  Future<void> borrarToken() async {}
+
+  @override
+  Stream<String> get cancionesTocadas => tocadas.stream;
+
+  @override
+  Future<String?> cancionAlAbrir() async => null;
+}
+
+class _MostradorFalso implements MostradorNotificaciones {
+  @override
+  Future<void> preparar() async {}
+
+  @override
+  Future<void> mostrar(
+    int id,
+    String titulo,
+    String texto, {
+    String? cancion,
+  }) async {}
+
+  @override
+  Stream<String> get cancionesTocadas => const Stream<String>.empty();
+
+  @override
+  Future<String?> cancionAlAbrir() async => null;
+}
+
+Future<void> _abrirApp(
+  WidgetTester tester,
+  ClienteApi cliente, {
+  ServicioNotificaciones? notificaciones,
+}) async {
   await AlmacenSesion().guardarTokens(acceso: 'a', renovacion: 'r');
-  await tester.pumpWidget(KaraokeApp(cliente: cliente));
+  await tester.pumpWidget(
+    KaraokeApp(cliente: cliente, notificaciones: notificaciones),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -141,5 +200,27 @@ void main() {
     );
 
     expect(find.text('Iniciar sesión'), findsOneWidget);
+  });
+
+  testWidgets('al tocar la notificación se abre la canción terminada', (
+    tester,
+  ) async {
+    final ClienteApi cliente = _cliente(() => tresCanciones);
+    final _MensajeriaFalsa fcm = _MensajeriaFalsa();
+    await _abrirApp(
+      tester,
+      cliente,
+      notificaciones: ServicioNotificaciones(
+        cliente: cliente,
+        mensajeria: fcm,
+        mostrador: _MostradorFalso(),
+      ),
+    );
+
+    fcm.tocadas.add('1');
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PantallaDetalleCancion), findsOneWidget);
+    expect(find.text('Demucs v4'), findsOneWidget);
   });
 }
