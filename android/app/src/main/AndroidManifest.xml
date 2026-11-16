@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Comunicacion con la API REST del servidor (siempre por HTTPS) -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="final_mobile_project"
+        android:label="Karaoke"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
