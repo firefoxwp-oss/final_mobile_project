@@ -1,3 +1,5 @@
+import 'package:final_mobile_project/datos/configuracion_karaoke.dart';
+import 'package:final_mobile_project/servicios/letra.dart';
 import 'package:final_mobile_project/servicios/reproductor_pistas.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -160,5 +162,70 @@ void main() {
 
     expect(voz.nivel, 0.3);
     expect(instrumental.nivel, 1);
+  });
+
+  group('resaltarPalabra', () {
+    PalabraLetra palabra(String texto, int inicio, int fin) => PalabraLetra(
+      texto: texto,
+      inicio: Duration(milliseconds: inicio),
+      fin: Duration(milliseconds: fin),
+    );
+    final Letra letra = Letra(<LineaLetra>[
+      LineaLetra(
+        inicio: Duration.zero,
+        fin: const Duration(seconds: 2),
+        palabras: <PalabraLetra>[palabra('hola', 0, 1000)],
+      ),
+      LineaLetra(
+        inicio: const Duration(seconds: 3),
+        fin: const Duration(seconds: 6),
+        palabras: <PalabraLetra>[
+          palabra('cantando', 3000, 3500),
+          palabra('bajo', 3600, 4000),
+          palabra('la', 4100, 4300),
+        ],
+      ),
+    ]);
+
+    Future<ReproductorPistas> reproductor(int desfaseMs) async {
+      final ReproductorPistas r = ReproductorPistas(<PistaAudio>[
+        _PistaFalsa(Duration.zero),
+        _PistaFalsa(Duration.zero),
+      ]);
+      await r.cargar(
+        <String>['instrumental.m4a', 'voz.m4a'],
+        letra: letra,
+        configuracion: ConfiguracionKaraoke(desfaseMs: desfaseMs),
+      );
+      return r;
+    }
+
+    test('separa lo cantado de lo que falta', () async {
+      final LetraResaltada resaltada = (await reproductor(
+        0,
+      )).resaltarPalabra(const Duration(milliseconds: 3700));
+
+      expect(resaltada.anterior, 'hola');
+      expect(resaltada.cantado, 'cantando bajo ');
+      expect(resaltada.pendiente, 'la');
+      expect(resaltada.siguiente, '');
+    });
+
+    test('el ajuste de sincronía retrasa la letra', () async {
+      final LetraResaltada resaltada = (await reproductor(
+        -500,
+      )).resaltarPalabra(const Duration(milliseconds: 3700));
+
+      expect(resaltada.cantado, 'cantando ');
+      expect(resaltada.pendiente, 'bajo la');
+    });
+
+    test('sin letra no resalta nada', () {
+      final ReproductorPistas r = ReproductorPistas(<PistaAudio>[
+        _PistaFalsa(Duration.zero),
+      ]);
+
+      expect(r.resaltarPalabra(Duration.zero), const LetraResaltada());
+    });
   });
 }
