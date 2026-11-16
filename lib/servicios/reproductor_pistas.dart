@@ -206,10 +206,11 @@ class ReproductorPistas {
   ) async {
     final bool sonaba = _sonando;
     if (sonaba) await pausar();
-    await Future.wait(<Future<Duration?>>[
+    final List<Duration?> duraciones = await Future.wait(<Future<Duration?>>[
       for (int i = 0; i < pistas.length; i++)
         Future<String>.value(rutas[i]).then(pistas[i].cargar),
     ]);
+    duracion = duraciones.first;
     if (pistas.length > 1) await cambiarVolumenVoz(configuracion.vozGuia);
     await Future.wait(pistas.map((PistaAudio p) => p.buscar(posicion)));
     if (sonaba) await reproducir();
