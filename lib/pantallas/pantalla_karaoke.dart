@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../datos/configuracion_karaoke.dart';
+import '../datos/grabacion.dart';
 import '../servicios/cancion.dart';
 import '../servicios/cliente_api.dart';
 import '../servicios/letra.dart';
@@ -20,6 +21,18 @@ const int pasoSincronia = 50;
 
 /// Ajuste máximo de la sincronía, hacia adelante o hacia atrás.
 const int sincroniaMaxima = 500;
+
+/// Estado de la grabación de la interpretación (Pb-13).
+enum EstadoGrabacion {
+  /// No se está grabando.
+  ninguna,
+
+  /// Se graba la voz mientras suena el instrumental.
+  grabando,
+
+  /// Terminó la grabación: se puede escuchar, guardar o descartar.
+  terminada,
+}
 
 /// Modo Karaoke en el celular (Pb-10), con el cambio de tono (Pb-11) y la
 /// grabación de la interpretación (Pb-13), según el prototipo de Pb-10.
@@ -68,6 +81,8 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
   int _semitonos = 0;
   int _desfaseMs = 0;
   bool _cambiandoTono = false;
+  final EstadoGrabacion _grabacion = EstadoGrabacion.ninguna;
+  final Duration _tiempoGrabado = Duration.zero;
 
   bool get _sonando => _reproductor.sonando;
 
@@ -254,6 +269,10 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
             style: TextStyle(color: tema.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
+          if (_grabacion == EstadoGrabacion.grabando) ...<Widget>[
+            AvisoGrabacion(tiempo: _tiempoGrabado, tono: textoTono(_semitonos)),
+            const SizedBox(height: 12),
+          ],
           if (_error != null)
             Container(
               key: const Key('errorKaraoke'),
@@ -366,16 +385,40 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
                 : null,
           ),
           const SizedBox(height: 24),
-          FilledButton.icon(
-            key: const Key('botonGrabar'),
-            onPressed: null,
-            style: FilledButton.styleFrom(
-              backgroundColor: tema.colorScheme.error,
-              minimumSize: const Size.fromHeight(52),
+          if (_grabacion == EstadoGrabacion.grabando) ...<Widget>[
+            Text(
+              'Usa audífonos para que solo se grabe tu voz',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: tema.colorScheme.onSurfaceVariant),
             ),
-            icon: const Icon(Icons.fiber_manual_record),
-            label: const Text('Grabar'),
-          ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              key: const Key('botonDetener'),
+              onPressed: null,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+              ),
+              icon: const Icon(Icons.stop),
+              label: const Text('Detener'),
+            ),
+          ] else
+            FilledButton.icon(
+              key: const Key('botonGrabar'),
+              onPressed: null,
+              style: FilledButton.styleFrom(
+                backgroundColor: tema.colorScheme.error,
+                minimumSize: const Size.fromHeight(52),
+              ),
+              icon: const Icon(Icons.fiber_manual_record),
+              label: const Text('Grabar'),
+            ),
+          if (_grabacion == EstadoGrabacion.terminada) ...<Widget>[
+            const SizedBox(height: 16),
+            ResultadoGrabacion(
+              titulo: widget.cancion.titulo,
+              duracion: _tiempoGrabado,
+            ),
+          ],
           const SizedBox(height: 24),
           Text(
             'La palabra resaltada sigue la posición del audio',
@@ -383,6 +426,130 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
             style: TextStyle(color: tema.colorScheme.onSurfaceVariant),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Aviso rojo con el tiempo grabado y el tono, según el prototipo de Pb-13.
+class AvisoGrabacion extends StatelessWidget {
+  /// Crea el aviso.
+  const AvisoGrabacion({required this.tiempo, required this.tono, super.key});
+
+  /// Tiempo grabado hasta ahora.
+  final Duration tiempo;
+
+  /// Tono en que se graba.
+  final String tono;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData tema = Theme.of(context);
+    return Container(
+      key: const Key('avisoGrabacion'),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: tema.colorScheme.errorContainer,
+        border: Border.all(color: tema.colorScheme.error),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(Icons.fiber_manual_record, color: tema.colorScheme.error),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Grabando · ${formatoTiempo(tiempo)}',
+              style: TextStyle(
+                color: tema.colorScheme.error,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Text(tono),
+        ],
+      ),
+    );
+  }
+}
+
+/// Tarjeta de la grabación terminada: escucharla, descartarla o guardarla.
+class ResultadoGrabacion extends StatelessWidget {
+  /// Crea la tarjeta.
+  const ResultadoGrabacion({
+    required this.titulo,
+    required this.duracion,
+    this.alEscuchar,
+    this.alDescartar,
+    this.alGuardar,
+    super.key,
+  });
+
+  /// Nombre de la canción grabada.
+  final String titulo;
+
+  /// Duración de la grabación.
+  final Duration duracion;
+
+  /// Acción del botón Escuchar.
+  final VoidCallback? alEscuchar;
+
+  /// Acción del botón Descartar.
+  final VoidCallback? alDescartar;
+
+  /// Acción del botón Guardar.
+  final VoidCallback? alGuardar;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData tema = Theme.of(context);
+    return Card(
+      key: const Key('resultadoGrabacion'),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: tema.colorScheme.outline),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text(
+              'Grabación terminada',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            Text(
+              '$titulo · ${formatoTiempo(duracion)}',
+              style: TextStyle(color: tema.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: alEscuchar,
+                    child: const Text('Escuchar'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: alDescartar,
+                    child: const Text('Descartar'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: alGuardar,
+                    child: const Text('Guardar'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

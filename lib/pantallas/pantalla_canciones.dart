@@ -2,10 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../datos/grabacion.dart';
 import '../servicios/cancion.dart';
 import '../servicios/cliente_api.dart';
 import '../servicios/servicio_notificaciones.dart';
 import 'pantalla_detalle_cancion.dart';
+import 'pantalla_grabaciones.dart';
 import 'pantalla_inicio_sesion.dart';
 import 'pantalla_subida.dart';
 
@@ -113,6 +115,13 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
     await _cargar();
   }
 
+  /// Grabaciones guardadas en el celular (Pb-13).
+  Future<void> _abrirGrabaciones() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => const PantallaGrabaciones(grabaciones: <Grabacion>[]),
+    ),
+  );
+
   Future<void> _cerrarSesion() async {
     await widget.notificaciones?.cerrarSesion();
     await widget.cliente.cerrarSesion();
@@ -128,6 +137,12 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
         title: const Text('Mis canciones'),
         backgroundColor: tema.colorScheme.surfaceContainerHighest,
         actions: <Widget>[
+          IconButton(
+            key: const Key('botonGrabaciones'),
+            tooltip: 'Mis grabaciones',
+            icon: const Icon(Icons.library_music_outlined),
+            onPressed: _abrirGrabaciones,
+          ),
           IconButton(
             key: const Key('botonCerrarSesion'),
             tooltip: 'Cerrar sesión',
