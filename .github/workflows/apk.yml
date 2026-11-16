@@ -37,6 +37,13 @@ jobs:
           echo "API_URL=$API_URL" > .env
           echo "WEB_URL=$WEB_URL" >> .env
 
+      - name: Configuración de Firebase
+        env:
+          # Contenido de android/app/google-services.json, guardado como
+          # secreto del repositorio (el archivo no se sube a Git)
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: echo "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+
       - name: Dependencias
         run: flutter pub get
 
