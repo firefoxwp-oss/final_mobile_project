@@ -60,8 +60,13 @@ class _PistaFalsa implements PistaAudio {
   double nivel = 1;
   bool sonando = false;
 
+  final List<String> rutas = <String>[];
+
   @override
-  Future<Duration?> cargar(String ruta) async => const Duration(seconds: 12);
+  Future<Duration?> cargar(String ruta) async {
+    rutas.add(ruta);
+    return const Duration(seconds: 12);
+  }
 
   @override
   Future<void> reproducir() async => sonando = true;
@@ -89,6 +94,7 @@ void main() {
   late Directory cache;
   late _PistaFalsa instrumental;
   late _PistaFalsa voz;
+  final List<String> peticiones = <String>[];
 
   setUp(() async {
     FlutterSecureStorage.setMockInitialValues(<String, String>{
@@ -97,13 +103,18 @@ void main() {
     });
     SharedPreferences.setMockInitialValues(<String, Object>{});
     cache = await Directory.systemTemp.createTemp('karaoke');
+    peticiones.clear();
     instrumental = _PistaFalsa();
     voz = _PistaFalsa();
   });
 
   tearDown(() => cache.delete(recursive: true));
 
-  Future<void> abrir(WidgetTester tester, {int estadoLetra = 200}) async {
+  Future<void> abrir(
+    WidgetTester tester, {
+    int estadoLetra = 200,
+    int estadoTono = 200,
+  }) async {
     await tester.binding.setSurfaceSize(const Size(400, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final ClienteApi cliente = ClienteApi(
@@ -111,6 +122,21 @@ void main() {
       almacen: AlmacenSesion(),
       carpetaPistas: () async => cache,
       cliente: MockClient((http.Request p) async {
+        peticiones.add(p.url.path);
+        if (p.url.path.contains('/tono/')) {
+          // El servidor tarda en generar el tono la primera vez
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          return estadoTono == 200
+              ? http.Response.bytes(<int>[9, 9], 200)
+              : http.Response.bytes(
+                  utf8.encode(
+                    jsonEncode(<String, String>{
+                      'detail': 'La canción no tiene esta pista',
+                    }),
+                  ),
+                  estadoTono,
+                );
+        }
         if (p.url.path.endsWith('/letra')) {
           return estadoLetra == 200
               ? http.Response(jsonEncode(_letra), 200)
@@ -270,27 +296,99 @@ void main() {
     expect(reproducir.onPressed, isNull);
   });
 
-  testWidgets('el tono va de −6 a +6 semitonos', (tester) async {
-    await abrir(tester);
-    final Finder subir = find.byTooltip('Subir Tono');
-    final Finder bajar = find.byTooltip('Bajar Tono');
-    IconButton boton(Finder f) => tester.widget<IconButton>(
-      find.ancestor(of: f, matching: find.byType(IconButton)),
-    );
+  /// Espera a que lleguen las pistas del tono nuevo.
+  Future<void> esperarTono(WidgetTester tester) async {
+    for (int i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      if (find.text('Preparando el tono…').evaluate().isEmpty) break;
+    }
+    await tester.pump();
+  }
 
-    for (int i = 0; i < 8; i++) {
-      await tester.tap(subir);
-      await tester.pump();
+  /// Toca un botón del tono y espera a que lleguen las pistas.
+  Future<void> cambiarTono(WidgetTester tester, String boton) async {
+    await tester.tap(find.byTooltip(boton));
+    await tester.pump();
+    await esperarTono(tester);
+  }
+
+  IconButton boton(WidgetTester tester, String tooltip) =>
+      tester.widget<IconButton>(
+        find.ancestor(
+          of: find.byTooltip(tooltip),
+          matching: find.byType(IconButton),
+        ),
+      );
+
+  testWidgets('cambia el tono sin mover la canción de su posición', (
+    tester,
+  ) async {
+    await abrir(tester);
+    await tester.tap(find.byKey(const Key('botonReproducir')));
+    await tester.pump();
+    instrumental.posicion = const Duration(seconds: 5);
+
+    await tester.tap(find.byTooltip('Subir Tono'));
+    await tester.pump();
+    expect(find.text('Preparando el tono…'), findsOneWidget);
+    expect(boton(tester, 'Subir Tono').onPressed, isNull);
+    await esperarTono(tester);
+
+    expect(find.text('+1'), findsOneWidget);
+    expect(find.text('Preparando el tono…'), findsNothing);
+    expect(peticiones.where((String p) => p.contains('/tono/')), <String>[
+      '/jobs/abc/tono/1/instrumental',
+      '/jobs/abc/tono/1/voz',
+    ]);
+    expect(instrumental.rutas.last, endsWith('abc_instrumental_1.m4a'));
+    expect(voz.rutas.last, endsWith('abc_voz_1.m4a'));
+    expect(instrumental.posicion, const Duration(seconds: 5));
+    expect(instrumental.sonando && voz.sonando, isTrue);
+    // La voz guía conserva su nivel con las pistas nuevas
+    expect(voz.nivel, 0.3);
+    await tester.tap(find.byKey(const Key('botonReproducir')));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('el tono va de −6 a +6 y se recuerda para la canción', (
+    tester,
+  ) async {
+    await abrir(tester);
+    for (int i = 0; i < 6; i++) {
+      await cambiarTono(tester, 'Subir Tono');
     }
     expect(find.text('+6'), findsOneWidget);
-    expect(boton(subir).onPressed, isNull);
-
-    for (int i = 0; i < 14; i++) {
-      await tester.tap(bajar);
-      await tester.pump();
+    expect(boton(tester, 'Subir Tono').onPressed, isNull);
+    for (int i = 0; i < 12; i++) {
+      await cambiarTono(tester, 'Bajar Tono');
     }
     expect(find.text('−6'), findsOneWidget);
-    expect(boton(bajar).onPressed, isNull);
+    expect(boton(tester, 'Bajar Tono').onPressed, isNull);
+    await tester.pumpWidget(const SizedBox());
+
+    // Al volver a abrir la canción suena en el último tono elegido
+    peticiones.clear();
+    instrumental.rutas.clear();
+    await abrir(tester);
+    expect(find.text('−6'), findsOneWidget);
+    // Las pistas en −6 ya están en la caché del celular
+    expect(instrumental.rutas.last, endsWith('abc_instrumental_-6.m4a'));
+    expect(peticiones.where((String p) => p.contains('/tono/')), isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('si el tono no se puede generar vuelve al anterior', (
+    tester,
+  ) async {
+    await abrir(tester, estadoTono: 404);
+
+    await cambiarTono(tester, 'Subir Tono');
+
+    expect(find.text('Original'), findsOneWidget);
+    expect(find.text('La canción no tiene esta pista'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 

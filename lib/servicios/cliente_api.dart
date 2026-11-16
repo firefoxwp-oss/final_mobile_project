@@ -57,6 +57,10 @@ class ClienteApi {
   final AlmacenSesion almacen;
 
   static const Duration _espera = Duration(seconds: 20);
+
+  /// Espera de una pista en otro tono: la primera vez el servidor la genera
+  /// (hasta 30 s en una canción de 4 minutos, RR-09).
+  static const Duration _esperaTono = Duration(seconds: 60);
   static const Map<String, String> _json = <String, String>{
     'Content-Type': 'application/json',
   };
@@ -148,24 +152,37 @@ class ClienteApi {
   );
 
   /// Descarga una pista del Modo Karaoke (`instrumental` o `voz`) en audio
-  /// comprimido y devuelve la ruta del archivo en el celular.
+  /// comprimido, en el tono de [semitonos] (Pb-11), y devuelve la ruta del
+  /// archivo en el celular.
   ///
   /// Las pistas quedan en la caché de la aplicación: al volver a abrir la
-  /// canción se reproducen sin descargarlas otra vez.
-  Future<String> obtenerPista(String id, String pista) async {
+  /// canción o a elegir un tono se reproducen sin descargarlas otra vez.
+  Future<String> obtenerPista(
+    String id,
+    String pista, {
+    int semitonos = 0,
+  }) async {
     final String? tipo = pistasKaraoke[pista];
     if (tipo == null) throw ArgumentError.value(pista, 'pista');
     final Directory carpeta = Directory(
       '${(await _carpetaPistas()).path}/pistas',
     );
-    final File archivo = File('${carpeta.path}/${id}_$pista.m4a');
+    final File archivo = File(
+      semitonos == 0
+          ? '${carpeta.path}/${id}_$pista.m4a'
+          : '${carpeta.path}/${id}_${pista}_$semitonos.m4a',
+    );
     if (await archivo.exists() && await archivo.length() > 0) {
       return archivo.path;
     }
-    final http.Response respuesta = await _conToken(
-      'GET',
-      '/descargar/$tipo/${Uri.encodeComponent(id)}',
-    );
+    final String trabajo = Uri.encodeComponent(id);
+    final http.Response respuesta = semitonos == 0
+        ? await _conToken('GET', '/descargar/$tipo/$trabajo')
+        : await _conToken(
+            'GET',
+            '/jobs/$trabajo/tono/$semitonos/$pista',
+            espera: _esperaTono,
+          );
     await carpeta.create(recursive: true);
     // Se escribe aparte y se renombra: una descarga cortada no queda como
     // pista válida en la caché
@@ -255,8 +272,9 @@ class ClienteApi {
     String metodo,
     String ruta, {
     Object? cuerpo,
+    Duration espera = _espera,
   }) async {
-    http.Response respuesta = await _peticion(metodo, ruta, cuerpo);
+    http.Response respuesta = await _peticion(metodo, ruta, cuerpo, espera);
     if (respuesta.statusCode == 401) {
       if (!await renovarSesion()) {
         throw const ErrorApi(
@@ -264,7 +282,7 @@ class ClienteApi {
           sesionVencida: true,
         );
       }
-      respuesta = await _peticion(metodo, ruta, cuerpo);
+      respuesta = await _peticion(metodo, ruta, cuerpo, espera);
     }
     _comprobar(respuesta);
     return respuesta;
@@ -273,8 +291,9 @@ class ClienteApi {
   Future<http.Response> _peticion(
     String metodo,
     String ruta,
-    Object? cuerpo,
-  ) async {
+    Object? cuerpo, [
+    Duration espera = _espera,
+  ]) async {
     final String? acceso = await almacen.leerTokenAcceso();
     final Map<String, String> cabeceras = <String, String>{
       'Authorization': 'Bearer $acceso',
@@ -285,14 +304,15 @@ class ClienteApi {
         ..headers.addAll(cabeceras);
       if (cuerpo != null) peticion.body = jsonEncode(cuerpo);
       return http.Response.fromStream(await _cliente.send(peticion));
-    });
+    }, espera);
   }
 
   Future<http.Response> _enviar(
-    Future<http.Response> Function() peticion,
-  ) async {
+    Future<http.Response> Function() peticion, [
+    Duration espera = _espera,
+  ]) async {
     try {
-      return await peticion().timeout(_espera);
+      return await peticion().timeout(espera);
     } on TimeoutException {
       throw const ErrorApi('El servidor no respondió a tiempo');
     } on http.ClientException {

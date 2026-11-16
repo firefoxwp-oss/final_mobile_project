@@ -116,6 +116,16 @@ void main() {
     expect(await File(voz).readAsBytes(), <int>[1, 2, 3, 4]);
   });
 
+  test('pide la pista en otro tono al servicio de tonos', () async {
+    final ClienteApi api = cliente();
+
+    final String ruta = await api.obtenerPista('abc', 'voz', semitonos: -3);
+    await api.obtenerPista('abc', 'voz', semitonos: -3);
+
+    expect(peticiones, <String>['/jobs/abc/tono/-3/voz']);
+    expect(ruta, endsWith('abc_voz_-3.m4a'));
+  });
+
   test('rechaza una pista que no existe', () {
     expect(() => cliente().obtenerPista('abc', 'bateria'), throwsArgumentError);
   });

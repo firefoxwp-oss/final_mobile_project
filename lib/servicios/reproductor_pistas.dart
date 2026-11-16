@@ -198,6 +198,23 @@ class ReproductorPistas {
     if (pistas.length > 1) await cambiarVolumenVoz(this.configuracion.vozGuia);
   }
 
+  /// Reemplaza las pistas por otras de la misma canción (en otro tono) y
+  /// continúa desde [posicion]; si la canción sonaba, sigue sonando.
+  Future<void> cambiarPistas(
+    List<FutureOr<String>> rutas,
+    Duration posicion,
+  ) async {
+    final bool sonaba = _sonando;
+    if (sonaba) await pausar();
+    await Future.wait(<Future<Duration?>>[
+      for (int i = 0; i < pistas.length; i++)
+        Future<String>.value(rutas[i]).then(pistas[i].cargar),
+    ]);
+    if (pistas.length > 1) await cambiarVolumenVoz(configuracion.vozGuia);
+    await Future.wait(pistas.map((PistaAudio p) => p.buscar(posicion)));
+    if (sonaba) await reproducir();
+  }
+
   /// Separa la línea que se canta en la posición del audio, corrida por el
   /// ajuste de sincronía: las palabras que ya empezaron quedan resaltadas.
   LetraResaltada resaltarPalabra(Duration posicionAudio) {

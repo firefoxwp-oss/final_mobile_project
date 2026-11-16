@@ -67,6 +67,7 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
   int _vozGuia = 30;
   int _semitonos = 0;
   int _desfaseMs = 0;
+  bool _cambiandoTono = false;
 
   bool get _sonando => _reproductor.sonando;
 
@@ -93,10 +94,10 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
       // La letra y las dos pistas se piden a la vez, y cada pista se carga
       // en el reproductor en cuanto termina de descargarse
       final Future<Letra> pedirLetra = widget.cliente.obtenerLetra(id);
-      final Future<void> cargarPistas = _reproductor.cargar(<Future<String>>[
-        widget.cliente.obtenerPista(id, 'instrumental'),
-        widget.cliente.obtenerPista(id, 'voz'),
-      ], configuracion: configuracion);
+      final Future<void> cargarPistas = _reproductor.cargar(
+        _pedirPistas(configuracion.semitonos),
+        configuracion: configuracion,
+      );
       final Letra letra = await pedirLetra;
       await cargarPistas;
       _reproductor.letra = letra;
@@ -161,6 +162,47 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
   /// Recuerda la voz guía, la sincronía y el tono en el celular.
   Future<void> _guardar() =>
       _reproductor.configuracion.guardar(widget.cancion.id);
+
+  /// obtenerPista(job_id, pista, semitonos) del instrumental y la voz guía,
+  /// a la vez; la canción se abre en el último tono elegido.
+  List<Future<String>> _pedirPistas(int semitonos) => <Future<String>>[
+    for (final String pista in pistasKaraoke.keys)
+      widget.cliente.obtenerPista(
+        widget.cancion.id,
+        pista,
+        semitonos: semitonos,
+      ),
+  ];
+
+  /// cambiarTono(semitonos): pide las pistas en el tono nuevo y las cambia
+  /// sin mover la canción de su posición (secuencia de Pb-10 y Pb-11).
+  Future<void> _cambiarTono(int semitonos) async {
+    final int anterior = _semitonos;
+    setState(() {
+      _semitonos = semitonos;
+      _cambiandoTono = true;
+    });
+    try {
+      final List<String> rutas = await Future.wait(_pedirPistas(semitonos));
+      await _reproductor.cambiarPistas(rutas, _reproductor.posicion);
+      _reproductor.configuracion = _reproductor.configuracion.copiar(
+        semitonos: semitonos,
+      );
+      unawaited(_guardar());
+    } on Object catch (e) {
+      if (!mounted) return;
+      setState(() => _semitonos = anterior);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e is ErrorApi ? e.mensaje : 'No se pudo cambiar el tono.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _cambiandoTono = false);
+    }
+  }
 
   /// Mueve la letra respecto del audio y la vuelve a resaltar enseguida.
   void _cambiarSincronia(int desfaseMs) {
@@ -298,13 +340,20 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
             valor: _semitonos == 0
                 ? 'Original'
                 : (_semitonos > 0 ? '+$_semitonos' : '−${-_semitonos}'),
-            alBajar: _semitonos > tonoMinimo
-                ? () => setState(() => _semitonos--)
+            alBajar: _cargada && !_cambiandoTono && _semitonos > tonoMinimo
+                ? () => _cambiarTono(_semitonos - 1)
                 : null,
-            alSubir: _semitonos < tonoMaximo
-                ? () => setState(() => _semitonos++)
+            alSubir: _cargada && !_cambiandoTono && _semitonos < tonoMaximo
+                ? () => _cambiarTono(_semitonos + 1)
                 : null,
           ),
+          if (_cambiandoTono)
+            Text(
+              'Preparando el tono…',
+              key: const Key('preparandoTono'),
+              textAlign: TextAlign.end,
+              style: TextStyle(color: tema.colorScheme.onSurfaceVariant),
+            ),
           ControlPaso(
             key: const Key('controlSincronia'),
             etiqueta: 'Sincronía',
