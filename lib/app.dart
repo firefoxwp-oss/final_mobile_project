@@ -15,7 +15,19 @@ class KaraokeApp extends StatelessWidget {
     return MaterialApp(
       title: 'Karaoke',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorSchemeSeed: colorPrincipal),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: colorPrincipal,
+          primary: colorPrincipal,
+        ),
+        appBarTheme: const AppBarTheme(
+          titleTextStyle: TextStyle(
+            color: Colors.black87,
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
       home: const PantallaInicioSesion(),
     );
   }
