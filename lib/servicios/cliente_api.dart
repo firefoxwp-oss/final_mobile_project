@@ -1,12 +1,21 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 import '../configuracion.dart';
 import 'almacen_sesion.dart';
 import 'cancion.dart';
+import 'letra.dart';
 import 'selector_video.dart';
+
+/// Pistas del Modo Karaoke y su nombre en el servicio de descarga.
+const Map<String, String> pistasKaraoke = <String, String>{
+  'instrumental': 'instrumental_comprimido',
+  'voz': 'voz_comprimida',
+};
 
 /// Error de la API con un mensaje comprensible para el usuario.
 class ErrorApi implements Exception {
@@ -28,15 +37,21 @@ class ErrorApi implements Exception {
 /// Autentica con tokens JWT: el de acceso acompaña cada petición y el de
 /// renovación permite obtener uno nuevo sin pedir otra vez la contraseña.
 class ClienteApi {
-  /// Crea el cliente; [cliente], [almacen] y [url] permiten reemplazarlos en
-  /// las pruebas.
-  ClienteApi({http.Client? cliente, AlmacenSesion? almacen, String? url})
-    : _cliente = cliente ?? http.Client(),
-      almacen = almacen ?? AlmacenSesion(),
-      _url = url ?? urlApi;
+  /// Crea el cliente; [cliente], [almacen], [url] y [carpetaPistas]
+  /// permiten reemplazarlos en las pruebas.
+  ClienteApi({
+    http.Client? cliente,
+    AlmacenSesion? almacen,
+    String? url,
+    Future<Directory> Function()? carpetaPistas,
+  }) : _cliente = cliente ?? http.Client(),
+       almacen = almacen ?? AlmacenSesion(),
+       _url = url ?? urlApi,
+       _carpetaPistas = carpetaPistas ?? getApplicationCacheDirectory;
 
   final http.Client _cliente;
   final String _url;
+  final Future<Directory> Function() _carpetaPistas;
 
   /// Almacén de los tokens de la sesión.
   final AlmacenSesion almacen;
@@ -125,6 +140,40 @@ class ClienteApi {
   Future<Cancion> obtenerTrabajo(String id) async => Cancion.desdeJson(
     await obtener('/jobs/${Uri.encodeComponent(id)}') as Map<String, dynamic>,
   );
+
+  /// Letra sincronizada por palabra de la canción (Pb-10).
+  Future<Letra> obtenerLetra(String id) async => Letra.desdeJson(
+    await obtener('/jobs/${Uri.encodeComponent(id)}/letra')
+        as Map<String, dynamic>,
+  );
+
+  /// Descarga una pista del Modo Karaoke (`instrumental` o `voz`) en audio
+  /// comprimido y devuelve la ruta del archivo en el celular.
+  ///
+  /// Las pistas quedan en la caché de la aplicación: al volver a abrir la
+  /// canción se reproducen sin descargarlas otra vez.
+  Future<String> obtenerPista(String id, String pista) async {
+    final String? tipo = pistasKaraoke[pista];
+    if (tipo == null) throw ArgumentError.value(pista, 'pista');
+    final Directory carpeta = Directory(
+      '${(await _carpetaPistas()).path}/pistas',
+    );
+    final File archivo = File('${carpeta.path}/${id}_$pista.m4a');
+    if (await archivo.exists() && await archivo.length() > 0) {
+      return archivo.path;
+    }
+    final http.Response respuesta = await _conToken(
+      'GET',
+      '/descargar/$tipo/${Uri.encodeComponent(id)}',
+    );
+    await carpeta.create(recursive: true);
+    // Se escribe aparte y se renombra: una descarga cortada no queda como
+    // pista válida en la caché
+    final File parcial = File('${archivo.path}.parcial');
+    await parcial.writeAsBytes(respuesta.bodyBytes, flush: true);
+    await parcial.rename(archivo.path);
+    return archivo.path;
+  }
 
   /// Sube el [video] para procesarlo y devuelve el id del trabajo en cola
   /// (Pb-9). [alProgreso] recibe la fracción enviada, de 0 a 1.
@@ -266,7 +315,9 @@ class ClienteApi {
 
   void _comprobar(http.Response respuesta) {
     if (respuesta.statusCode >= 200 && respuesta.statusCode < 300) return;
-    throw ErrorApi('Error del servidor (${respuesta.statusCode})');
+    throw ErrorApi(
+      _detalle(respuesta) ?? 'Error del servidor (${respuesta.statusCode})',
+    );
   }
 
   Future<void> _guardarTokens(http.Response respuesta) async {

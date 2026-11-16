@@ -78,7 +78,8 @@ void main() {
     expect(reproductor.desfaseEntrePistas, const Duration(milliseconds: 120));
 
     await reproductor.sincronizar();
-    expect(voz.factor, 1.08);
+    // 120 ms se corrigen en 2 s: 6 % más rápido
+    expect(voz.factor, closeTo(1.06, 0.0001));
 
     // Ya alineada, vuelve a la velocidad normal
     voz.posicion = const Duration(milliseconds: 995);
@@ -96,7 +97,13 @@ void main() {
 
     await reproductor.sincronizar();
 
-    expect(voz.factor, 0.92);
+    expect(voz.factor, closeTo(0.95, 0.0001));
+  });
+
+  test('el ajuste de velocidad tiene límites', () {
+    expect(ReproductorPistas.ajuste(const Duration(milliseconds: 50)), 0.04);
+    expect(ReproductorPistas.ajuste(const Duration(milliseconds: 400)), 0.2);
+    expect(ReproductorPistas.ajuste(const Duration(milliseconds: 900)), 0.2);
   });
 
   test('una separación grande se corrige con un salto', () async {
@@ -113,7 +120,7 @@ void main() {
   });
 
   test('no corrige la voz si la separación es tolerable', () async {
-    final _PistaFalsa voz = _PistaFalsa(const Duration(milliseconds: 1030));
+    final _PistaFalsa voz = _PistaFalsa(const Duration(milliseconds: 1045));
     final ReproductorPistas reproductor = ReproductorPistas(<PistaAudio>[
       _PistaFalsa(const Duration(seconds: 1)),
       voz,

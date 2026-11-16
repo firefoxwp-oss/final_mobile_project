@@ -1,39 +1,26 @@
 // Prueba de la reproducción sincronizada de dos pistas en el celular
 // (Pb-10, Sp-1).
 //
-// Descarga el instrumental y la voz comprimidos (M4A) de una canción
-// terminada, los reproduce a la vez y mide la separación entre ambos al
-// empezar, mientras suenan, al adelantar y al cambiar el volumen de la voz.
+// Obtiene la letra y descarga el instrumental y la voz comprimidos (M4A)
+// de una canción terminada (Sp-3), los reproduce a la vez y mide la
+// separación entre ambos al empezar, al adelantar y al cambiar el volumen de
+// la voz.
 //
-//   flutter test integration_test/dos_pistas_test.dart
+//   flutter drive --profile --driver=test_driver/integration_test.dart
+//     --target=integration_test/dos_pistas_test.dart
 //     --dart-define=PRUEBA_EMAIL=... --dart-define=PRUEBA_CLAVE=...
 //     --dart-define=JOB_ID=...
-import 'dart:io';
-
 import 'package:final_mobile_project/configuracion.dart';
-import 'package:final_mobile_project/servicios/almacen_sesion.dart';
 import 'package:final_mobile_project/servicios/cliente_api.dart';
+import 'package:final_mobile_project/servicios/letra.dart';
 import 'package:final_mobile_project/servicios/reproductor_pistas.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
 import 'package:integration_test/integration_test.dart';
 
 const String _correo = String.fromEnvironment('PRUEBA_EMAIL');
 const String _clave = String.fromEnvironment('PRUEBA_CLAVE');
 const String _trabajo = String.fromEnvironment('JOB_ID');
-
-Future<String> _descargar(ClienteApi cliente, String pista) async {
-  final String? token = await AlmacenSesion().leerTokenAcceso();
-  final http.Response respuesta = await http.get(
-    cliente.uri('/descargar/$pista/$_trabajo'),
-    headers: <String, String>{'Authorization': 'Bearer $token'},
-  );
-  expect(respuesta.statusCode, 200);
-  final File archivo = File('${Directory.systemTemp.path}/$pista.m4a');
-  await archivo.writeAsBytes(respuesta.bodyBytes);
-  return archivo.path;
-}
 
 /// Corrige la separación cada 250 ms durante [tiempo], como lo hace el
 /// Modo Karaoke, y devuelve la mayor separación de los últimos 2 s, ya
@@ -58,10 +45,18 @@ void main() {
     await cargarConfiguracion();
     final ClienteApi cliente = ClienteApi();
     await cliente.iniciarSesion(_correo, _clave);
+    final Letra letra = await cliente.obtenerLetra(_trabajo);
+    final DateTime inicio = DateTime.now();
     final List<String> rutas = <String>[
-      await _descargar(cliente, 'instrumental_comprimido'),
-      await _descargar(cliente, 'voz_comprimida'),
+      await cliente.obtenerPista(_trabajo, 'instrumental'),
+      await cliente.obtenerPista(_trabajo, 'voz'),
     ];
+    final int descarga = DateTime.now().difference(inicio).inMilliseconds;
+    debugPrint(
+      'LETRA ${letra.lineas.length} lineas: ${letra.lineas.first.texto}',
+    );
+    debugPrint('PISTAS descargadas en $descarga ms');
+    expect(letra.lineas, isNotEmpty);
     final ReproductorPistas reproductor = ReproductorPistas(<PistaAudio>[
       PistaDispositivo(),
       PistaDispositivo(),
