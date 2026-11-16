@@ -26,6 +26,17 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Variables de entorno
+        env:
+          # Direcciones del servidor y de la web, definidas como variables
+          # del repositorio; si faltan, la aplicación usa sus valores por
+          # defecto
+          API_URL: ${{ vars.API_URL }}
+          WEB_URL: ${{ vars.WEB_URL }}
+        run: |
+          echo "API_URL=$API_URL" > .env
+          echo "WEB_URL=$WEB_URL" >> .env
+
       - name: Dependencias
         run: flutter pub get
 
@@ -39,16 +50,7 @@ jobs:
         run: flutter test
 
       - name: Compilar el APK
-        env:
-          # Direcciones del servidor y de la web, definidas como variables
-          # del repositorio; si faltan, se usan los valores por defecto
-          API_URL: ${{ vars.API_URL }}
-          WEB_URL: ${{ vars.WEB_URL }}
-        run: |
-          ARGS=""
-          if [ -n "$API_URL" ]; then ARGS="$ARGS --dart-define=API_URL=$API_URL"; fi
-          if [ -n "$WEB_URL" ]; then ARGS="$ARGS --dart-define=WEB_URL=$WEB_URL"; fi
-          flutter build apk --release $ARGS
+        run: flutter build apk --release
 
       - name: Publicar el APK
         uses: actions/upload-artifact@v4
