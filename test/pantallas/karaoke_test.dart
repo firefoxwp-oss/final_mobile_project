@@ -106,7 +106,12 @@ class _GrabadorFalso implements GrabadorVoz {
   Future<void> iniciar(String destino) async {
     ruta = destino;
     grabando = true;
-    File(destino).writeAsBytesSync(<int>[1, 2, 3]);
+    // WAV mono de 16 bits, sin muestras
+    File(destino).writeAsBytesSync(<int>[
+      ...'RIFF'.codeUnits, 36, 0, 0, 0, ...'WAVEfmt '.codeUnits, //
+      16, 0, 0, 0, 1, 0, 1, 0, 68, 172, 0, 0, 136, 88, 1, 0, 2, 0, 16, 0,
+      ...'data'.codeUnits, 0, 0, 0, 0,
+    ]);
   }
 
   @override
@@ -321,7 +326,7 @@ void main() {
 
   /// Ejecuta en tiempo real las tareas del archivo y del micrófono.
   Future<void> esperar(WidgetTester tester) async {
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 15; i++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 30)),
       );
