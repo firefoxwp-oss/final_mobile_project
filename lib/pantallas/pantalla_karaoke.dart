@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../datos/almacen_grabaciones.dart';
 import '../datos/configuracion_karaoke.dart';
 import '../datos/grabacion.dart';
 import '../servicios/cancion.dart';
@@ -48,6 +49,7 @@ class PantallaKaraoke extends StatefulWidget {
     this.crearReproductor,
     this.crearGrabador,
     this.carpetaGrabaciones,
+    this.almacenGrabaciones,
     super.key,
   });
 
@@ -67,6 +69,9 @@ class PantallaKaraoke extends StatefulWidget {
   /// Carpeta de las grabaciones; por defecto, la de documentos de la
   /// aplicación.
   final Future<Directory> Function()? carpetaGrabaciones;
+
+  /// Grabaciones guardadas en el celular; en las pruebas se reemplaza.
+  final AlmacenGrabaciones? almacenGrabaciones;
 
   @override
   State<PantallaKaraoke> createState() => _PantallaKaraokeState();
@@ -99,6 +104,11 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
   EstadoGrabacion _grabacion = EstadoGrabacion.ninguna;
   Duration _tiempoGrabado = Duration.zero;
   String? _rutaVoz;
+  late final AlmacenGrabaciones _almacen =
+      widget.almacenGrabaciones ?? AlmacenGrabaciones();
+
+  /// Pistas que suenan (instrumental y voz guía), en el tono elegido.
+  List<Future<String>> _rutasPistas = <Future<String>>[];
 
   /// Cronómetro desde que empieza la grabación; con la posición del audio
   /// indica cuándo empezó a sonar la canción en la grabación.
@@ -132,8 +142,9 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
       // La letra y las dos pistas se piden a la vez, y cada pista se carga
       // en el reproductor en cuanto termina de descargarse
       final Future<Letra> pedirLetra = widget.cliente.obtenerLetra(id);
+      _rutasPistas = _pedirPistas(configuracion.semitonos);
       final Future<void> cargarPistas = _reproductor.cargar(
-        _pedirPistas(configuracion.semitonos),
+        _rutasPistas,
         configuracion: configuracion,
       );
       final Letra letra = await pedirLetra;
@@ -229,6 +240,40 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
     return Duration(microseconds: ordenados[ordenados.length ~/ 2]);
   }
 
+  /// guardar(): guarda la grabación con una copia del instrumental que
+  /// sonó, en el tono elegido (secuencia de Pb-13).
+  Future<void> _guardarGrabacion() async {
+    final String? voz = _rutaVoz;
+    if (voz == null) return;
+    try {
+      await _almacen.guardar(
+        Grabacion(
+          idCancion: widget.cancion.id,
+          titulo: widget.cancion.titulo,
+          rutaVoz: voz,
+          rutaInstrumental: '',
+          semitonos: _semitonos,
+          vozGuia: _vozGuia,
+          duracionSegundos: _tiempoGrabado.inSeconds,
+          fecha: DateTime.now(),
+        ),
+        await _rutasPistas.first,
+      );
+    } on Object {
+      if (mounted) _avisar('No se pudo guardar la grabación.');
+      return;
+    }
+    // La voz ya pertenece a la grabación guardada: no se borra
+    _rutaVoz = null;
+    if (!mounted) return;
+    setState(() => _grabacion = EstadoGrabacion.ninguna);
+    _avisar('Grabación guardada en «Mis grabaciones»');
+  }
+
+  void _avisar(String mensaje) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(mensaje)));
+
   /// Descarta la grabación terminada y borra su archivo.
   Future<void> _descartar() async {
     final String? ruta = _rutaVoz;
@@ -321,6 +366,9 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
     try {
       final List<String> rutas = await Future.wait(_pedirPistas(semitonos));
       await _reproductor.cambiarPistas(rutas, _reproductor.posicion);
+      _rutasPistas = <Future<String>>[
+        for (final String ruta in rutas) Future<String>.value(ruta),
+      ];
       _reproductor.configuracion = _reproductor.configuracion.copiar(
         semitonos: semitonos,
       );
@@ -549,6 +597,7 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
               titulo: widget.cancion.titulo,
               duracion: _tiempoGrabado,
               alDescartar: _descartar,
+              alGuardar: _guardarGrabacion,
             ),
           ],
           const SizedBox(height: 24),
