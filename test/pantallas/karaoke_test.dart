@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:final_mobile_project/datos/almacen_grabaciones.dart';
+import 'package:final_mobile_project/datos/grabacion.dart';
 import 'package:final_mobile_project/pantallas/pantalla_karaoke.dart';
 import 'package:final_mobile_project/servicios/almacen_sesion.dart';
 import 'package:final_mobile_project/servicios/cancion.dart';
@@ -13,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 final Cancion _cancion = Cancion.desdeJson(<String, dynamic>{
   'id': 'abc',
@@ -129,6 +132,9 @@ void main() {
   late _PistaFalsa instrumental;
   late _PistaFalsa voz;
   late _GrabadorFalso grabador;
+  late AlmacenGrabaciones almacen;
+
+  setUpAll(sqfliteFfiInit);
   final List<String> peticiones = <String>[];
 
   setUp(() async {
@@ -142,9 +148,17 @@ void main() {
     instrumental = _PistaFalsa();
     voz = _PistaFalsa();
     grabador = _GrabadorFalso();
+    almacen = AlmacenGrabaciones(
+      fabrica: databaseFactoryFfi,
+      rutaBase: inMemoryDatabasePath,
+      carpeta: () async => cache,
+    );
   });
 
-  tearDown(() => cache.delete(recursive: true));
+  tearDown(() async {
+    await almacen.cerrar();
+    await cache.delete(recursive: true);
+  });
 
   Future<void> abrir(
     WidgetTester tester, {
@@ -197,6 +211,7 @@ void main() {
               ReproductorPistas(<PistaAudio>[instrumental, voz]),
           crearGrabador: () => grabador,
           carpetaGrabaciones: () async => cache,
+          almacenGrabaciones: almacen,
         ),
       ),
     );
@@ -399,6 +414,36 @@ void main() {
 
     expect(voz.existsSync(), isFalse);
     expect(find.byKey(const Key('resultadoGrabacion')), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('guarda la grabación con el instrumental del tono usado', (
+    tester,
+  ) async {
+    await abrir(tester);
+    await tester.tap(find.byKey(const Key('botonGrabar')));
+    await esperar(tester);
+    instrumental.posicion = const Duration(seconds: 4);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.byKey(const Key('botonDetener')));
+    await esperar(tester);
+
+    await tester.ensureVisible(find.text('Guardar'));
+    await tester.tap(find.text('Guardar'));
+    await esperar(tester);
+
+    expect(find.byKey(const Key('resultadoGrabacion')), findsNothing);
+    expect(find.text('Grabación guardada en «Mis grabaciones»'), findsOne);
+    final List<Grabacion> guardadas =
+        await tester.runAsync(almacen.listar) as List<Grabacion>;
+    expect(guardadas, hasLength(1));
+    final Grabacion guardada = guardadas.single;
+    expect(guardada.titulo, 'mi_cancion');
+    expect(guardada.rutaVoz, grabador.ruta);
+    expect(guardada.duracionSegundos, 4);
+    expect(guardada.vozGuia, 30);
+    expect(guardada.semitonos, 0);
+    expect(File(guardada.rutaInstrumental).existsSync(), isTrue);
     await tester.pumpWidget(const SizedBox());
   });
 
