@@ -1,8 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Comunicacion con la API REST del servidor (siempre por HTTPS) -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Grabar la interpretacion con el microfono (Pb-13) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
-        android:label="final_mobile_project"
+        android:label="Karaoke"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Canal de las notificaciones de procesamiento enviadas por el servidor (Pb-4) -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="procesamientos"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -37,6 +45,11 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- Abrir la web del sistema (registro de cuentas) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
