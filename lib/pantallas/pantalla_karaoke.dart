@@ -245,6 +245,7 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
   Future<void> _guardarGrabacion() async {
     final String? voz = _rutaVoz;
     if (voz == null) return;
+    await _detenerVistaPrevia();
     try {
       await _almacen.guardar(
         Grabacion(
@@ -274,8 +275,36 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
     context,
   ).showSnackBar(SnackBar(content: Text(mensaje)));
 
+  ReproductorPistas? _vistaPrevia;
+
+  /// Escucha la grabación terminada antes de guardarla; otro toque la
+  /// detiene.
+  Future<void> _escucharGrabacion() async {
+    final String? voz = _rutaVoz;
+    if (voz == null) return;
+    final ReproductorPistas? anterior = _vistaPrevia;
+    if (anterior != null) {
+      _vistaPrevia = null;
+      await anterior.liberar();
+      return;
+    }
+    if (_sonando) await _alternar();
+    final ReproductorPistas vista =
+        widget.crearReproductor?.call() ??
+        ReproductorPistas(<PistaAudio>[PistaDispositivo(), PistaDispositivo()]);
+    _vistaPrevia = vista;
+    await vista.reproducirGrabacion(voz, await _rutasPistas.first);
+  }
+
+  Future<void> _detenerVistaPrevia() async {
+    final ReproductorPistas? vista = _vistaPrevia;
+    _vistaPrevia = null;
+    await vista?.liberar();
+  }
+
   /// Descarta la grabación terminada y borra su archivo.
   Future<void> _descartar() async {
+    await _detenerVistaPrevia();
     final String? ruta = _rutaVoz;
     _rutaVoz = null;
     if (ruta != null && await File(ruta).exists()) await File(ruta).delete();
@@ -416,6 +445,7 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
   void dispose() {
     _reloj?.cancel();
     if (_grabando) unawaited(_grabador.detener());
+    unawaited(_detenerVistaPrevia());
     unawaited(_grabador.liberar());
     unawaited(_mantenerPantalla(encendida: false));
     unawaited(_reproductor.liberar());
@@ -596,6 +626,7 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
             ResultadoGrabacion(
               titulo: widget.cancion.titulo,
               duracion: _tiempoGrabado,
+              alEscuchar: _escucharGrabacion,
               alDescartar: _descartar,
               alGuardar: _guardarGrabacion,
             ),

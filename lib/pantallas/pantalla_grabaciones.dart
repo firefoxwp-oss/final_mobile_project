@@ -1,28 +1,144 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../datos/almacen_grabaciones.dart';
 import '../datos/grabacion.dart';
+import '../servicios/reproductor_pistas.dart';
 import 'pantalla_karaoke.dart';
 
 /// «Mis grabaciones»: interpretaciones guardadas en el celular (Pb-13),
 /// según el prototipo de Pb-13.
 class PantallaGrabaciones extends StatefulWidget {
-  /// Crea la pantalla con las [grabaciones] guardadas.
-  const PantallaGrabaciones({required this.grabaciones, super.key});
+  /// Crea la pantalla con las grabaciones del [almacen].
+  const PantallaGrabaciones({
+    required this.almacen,
+    this.crearReproductor,
+    super.key,
+  });
 
-  /// Grabaciones guardadas, de la más reciente a la más antigua.
-  final List<Grabacion> grabaciones;
+  /// Grabaciones guardadas en el celular.
+  final AlmacenGrabaciones almacen;
+
+  /// Crea el reproductor de la voz y el instrumental; en las pruebas se
+  /// reemplaza por uno simulado.
+  final ReproductorPistas Function()? crearReproductor;
 
   @override
   State<PantallaGrabaciones> createState() => _PantallaGrabacionesState();
 }
 
 class _PantallaGrabacionesState extends State<PantallaGrabaciones> {
+  late final ReproductorPistas _reproductor =
+      widget.crearReproductor?.call() ??
+      ReproductorPistas(<PistaAudio>[PistaDispositivo(), PistaDispositivo()]);
+  List<Grabacion>? _grabaciones;
   Grabacion? _actual;
+  double _avance = 0;
+  Timer? _reloj;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_listar());
+  }
+
+  /// abrir(): lista las grabaciones guardadas (secuencia de Pb-13).
+  Future<void> _listar() async {
+    final List<Grabacion> grabaciones = await widget.almacen.listar();
+    if (mounted) setState(() => _grabaciones = grabaciones);
+  }
+
+  /// escuchar(grabacion): la voz grabada y su instrumental, juntos.
+  Future<void> _escuchar(Grabacion grabacion) async {
+    setState(() {
+      _actual = grabacion;
+      _avance = 0;
+    });
+    await _reproductor.reproducirGrabacion(
+      grabacion.rutaVoz,
+      grabacion.rutaInstrumental,
+    );
+    _seguir();
+  }
+
+  Future<void> _alternar() async {
+    if (_reproductor.sonando) {
+      _reloj?.cancel();
+      await _reproductor.pausar();
+    } else {
+      await _reproductor.reproducir();
+      _seguir();
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// Avance de la barra mientras suena; la grabación termina donde terminó
+  /// la voz, aunque el instrumental siga, y vuelve al inicio.
+  void _seguir() {
+    _reloj?.cancel();
+    _reloj = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      final int segundos = _actual?.duracionSegundos ?? 0;
+      final Duration total = segundos > 0
+          ? Duration(seconds: segundos)
+          : _reproductor.duracion ?? Duration.zero;
+      final Duration posicion = _reproductor.posicion;
+      if (total > Duration.zero && posicion >= total) {
+        _reloj?.cancel();
+        unawaited(
+          _reproductor.pausar().then((_) => _reproductor.buscar(Duration.zero)),
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _avance = total > Duration.zero
+            ? (posicion.inMilliseconds / total.inMilliseconds).clamp(0, 1)
+            : 0;
+      });
+      unawaited(_reproductor.sincronizar());
+    });
+  }
+
+  Future<void> _eliminar(Grabacion grabacion) async {
+    final bool? confirmar = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext contexto) => AlertDialog(
+        title: const Text('Eliminar grabación'),
+        content: Text('¿Eliminar la grabación de «${grabacion.titulo}»?'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(contexto).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(contexto).pop(true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+    if (_actual?.id == grabacion.id) {
+      _reloj?.cancel();
+      await _reproductor.pausar();
+      _actual = null;
+    }
+    await widget.almacen.eliminar(grabacion);
+    await _listar();
+  }
+
+  @override
+  void dispose() {
+    _reloj?.cancel();
+    unawaited(_reproductor.liberar());
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final ThemeData tema = Theme.of(context);
     final Grabacion? actual = _actual;
+    final List<Grabacion>? grabaciones = _grabaciones;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mis grabaciones'),
@@ -31,7 +147,9 @@ class _PantallaGrabacionesState extends State<PantallaGrabaciones> {
       body: Column(
         children: <Widget>[
           Expanded(
-            child: widget.grabaciones.isEmpty
+            child: grabaciones == null
+                ? const Center(child: CircularProgressIndicator())
+                : grabaciones.isEmpty
                 ? const Center(
                     key: Key('sinGrabaciones'),
                     child: Padding(
@@ -45,16 +163,22 @@ class _PantallaGrabacionesState extends State<PantallaGrabaciones> {
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.all(16),
-                    itemCount: widget.grabaciones.length,
+                    itemCount: grabaciones.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 12),
                     itemBuilder: (_, int i) => TarjetaGrabacion(
-                      grabacion: widget.grabaciones[i],
-                      alEscuchar: () =>
-                          setState(() => _actual = widget.grabaciones[i]),
+                      grabacion: grabaciones[i],
+                      alEscuchar: () => _escuchar(grabaciones[i]),
+                      alEliminar: () => _eliminar(grabaciones[i]),
                     ),
                   ),
           ),
-          if (actual != null) BarraGrabacion(grabacion: actual),
+          if (actual != null)
+            BarraGrabacion(
+              grabacion: actual,
+              sonando: _reproductor.sonando,
+              avance: _avance,
+              alAlternar: _alternar,
+            ),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(

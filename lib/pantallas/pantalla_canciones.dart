@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../datos/grabacion.dart';
+import '../datos/almacen_grabaciones.dart';
 import '../servicios/cancion.dart';
 import '../servicios/cliente_api.dart';
 import '../servicios/servicio_notificaciones.dart';
@@ -118,7 +118,7 @@ class _PantallaCancionesState extends State<PantallaCanciones> {
   /// Grabaciones guardadas en el celular (Pb-13).
   Future<void> _abrirGrabaciones() => Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (_) => const PantallaGrabaciones(grabaciones: <Grabacion>[]),
+      builder: (_) => PantallaGrabaciones(almacen: AlmacenGrabaciones()),
     ),
   );
 

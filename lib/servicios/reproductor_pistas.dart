@@ -216,6 +216,16 @@ class ReproductorPistas {
     if (sonaba) await reproducir();
   }
 
+  /// Reproduce una grabación guardada: la copia del [instrumental] y la
+  /// [voz] grabada, juntas desde el inicio (Pb-13).
+  Future<void> reproducirGrabacion(String voz, String instrumental) async {
+    if (_sonando) await pausar();
+    await cargar(<String>[instrumental, voz]);
+    await cambiarVolumen(1, 1);
+    await buscar(Duration.zero);
+    await reproducir();
+  }
+
   /// Separa la línea que se canta en la posición del audio, corrida por el
   /// ajuste de sincronía: las palabras que ya empezaron quedan resaltadas.
   LetraResaltada resaltarPalabra(Duration posicionAudio) {
