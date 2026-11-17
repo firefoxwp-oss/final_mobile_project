@@ -100,6 +100,11 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
   Duration _tiempoGrabado = Duration.zero;
   String? _rutaVoz;
 
+  /// Cronómetro desde que empieza la grabación; con la posición del audio
+  /// indica cuándo empezó a sonar la canción en la grabación.
+  final Stopwatch _cronometro = Stopwatch();
+  final List<int> _iniciosCancion = <int>[];
+
   bool get _grabando => _grabacion == EstadoGrabacion.grabando;
 
   bool get _sonando => _reproductor.sonando;
@@ -175,9 +180,13 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
     final Directory carpeta = Directory('${documentos.path}/grabaciones');
     await carpeta.create(recursive: true);
     final String ruta =
-        '${carpeta.path}/voz_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        '${carpeta.path}/voz_${DateTime.now().millisecondsSinceEpoch}.wav';
     await _reproductor.buscar(Duration.zero);
     await _grabador.iniciar(ruta);
+    _cronometro
+      ..reset()
+      ..start();
+    _iniciosCancion.clear();
     setState(() {
       _grabacion = EstadoGrabacion.grabando;
       _tiempoGrabado = Duration.zero;
@@ -191,6 +200,18 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
     if (!_grabando) return;
     final String? ruta = await _grabador.detener();
     if (_sonando) await _alternar();
+    if (ruta != null) {
+      // La voz se canta al oír la canción: se recorta hasta el momento en que
+      // empezó a sonar, con la corrección medida del celular y el retraso de
+      // los audífonos, que es el ajuste de sincronía elegido (negativo con
+      // audífonos Bluetooth)
+      await alinearVoz(
+        ruta,
+        _inicioCancion() +
+            correccionGrabacion -
+            Duration(milliseconds: _desfaseMs),
+      );
+    }
     if (!mounted) return;
     setState(() {
       _grabacion = ruta == null
@@ -198,6 +219,14 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
           : EstadoGrabacion.terminada;
       _rutaVoz = ruta;
     });
+  }
+
+  /// Mediana de los momentos en que la canción estuvo en 0, medidos durante
+  /// la grabación.
+  Duration _inicioCancion() {
+    if (_iniciosCancion.isEmpty) return Duration.zero;
+    final List<int> ordenados = List<int>.of(_iniciosCancion)..sort();
+    return Duration(microseconds: ordenados[ordenados.length ~/ 2]);
   }
 
   /// Descarta la grabación terminada y borra su archivo.
@@ -247,7 +276,14 @@ class _PantallaKaraokeState extends State<PantallaKaraoke> {
       unawaited(_grabando ? _detener() : _alternar());
       return;
     }
-    if (_grabando) _tiempoGrabado = posicion;
+    if (_grabando) {
+      _tiempoGrabado = posicion;
+      // Momento de la grabación en que la canción estuvo en 0; al empezar,
+      // la posición del reproductor todavía es una estimación
+      if (posicion > const Duration(seconds: 1)) {
+        _iniciosCancion.add((_cronometro.elapsed - posicion).inMicroseconds);
+      }
+    }
     final LetraResaltada letra = _reproductor.resaltarPalabra(posicion);
     // La barra avanza cada 250 ms; la letra, en cuanto cambia una palabra
     if (letra != _letra ||
