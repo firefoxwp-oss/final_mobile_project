@@ -182,6 +182,20 @@ void main() {
     expect(servidor.peticiones, isEmpty);
   });
 
+  test('sin notificaciones (iOS) la sesión no registra el celular', () async {
+    final _Servidor servidor = _Servidor();
+    final ServicioNotificaciones servicio = ServicioNotificaciones(
+      cliente: servidor.cliente(),
+      mensajeria: const SinNotificaciones(),
+      mostrador: const SinNotificaciones(),
+    );
+
+    await servicio.iniciarSesion();
+    await servicio.cerrarSesion();
+
+    expect(servidor.peticiones, isEmpty);
+  });
+
   test('al tocar una notificación se abre su canción', () async {
     final _MensajeriaFalsa fcm = _MensajeriaFalsa(inicial: 'cerrada');
     final _MostradorFalso mostrador = _MostradorFalso();

@@ -95,6 +95,19 @@ class _PistaFalsa implements PistaAudio {
 }
 
 /// Micrófono simulado: escribe un archivo al grabar.
+/// Almacén cuyo guardado falla, por ejemplo por falta de espacio.
+class _AlmacenQueFalla extends AlmacenGrabaciones {
+  _AlmacenQueFalla({
+    required super.fabrica,
+    required super.rutaBase,
+    required super.carpeta,
+  });
+
+  @override
+  Future<Grabacion> guardar(Grabacion grabacion, String instrumental) =>
+      Future<Grabacion>.error(const FileSystemException('Sin espacio'));
+}
+
 class _GrabadorFalso implements GrabadorVoz {
   _GrabadorFalso({this.permiso = true});
 
@@ -447,6 +460,31 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('si la grabación no se puede guardar avisa al usuario', (
+    tester,
+  ) async {
+    almacen = _AlmacenQueFalla(
+      fabrica: databaseFactoryFfi,
+      rutaBase: inMemoryDatabasePath,
+      carpeta: () async => cache,
+    );
+    await abrir(tester);
+    await tester.tap(find.byKey(const Key('botonGrabar')));
+    await esperar(tester);
+    instrumental.posicion = const Duration(seconds: 4);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.byKey(const Key('botonDetener')));
+    await esperar(tester);
+
+    await tester.ensureVisible(find.text('Guardar'));
+    await tester.tap(find.text('Guardar'));
+    await esperar(tester);
+
+    expect(find.text('No se pudo guardar la grabación.'), findsOne);
+    expect(find.byKey(const Key('resultadoGrabacion')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('sin el permiso del micrófono explica cómo darlo', (
     tester,
   ) async {
@@ -517,10 +555,14 @@ void main() {
 
     expect(find.text('+1'), findsOneWidget);
     expect(find.text('Preparando el tono…'), findsNothing);
-    expect(peticiones.where((String p) => p.contains('/tono/')), <String>[
-      '/jobs/abc/tono/1/instrumental',
-      '/jobs/abc/tono/1/voz',
-    ]);
+    // Las dos pistas se descargan a la vez: el orden puede variar
+    expect(
+      peticiones.where((String p) => p.contains('/tono/')),
+      unorderedEquals(<String>[
+        '/jobs/abc/tono/1/instrumental',
+        '/jobs/abc/tono/1/voz',
+      ]),
+    );
     expect(instrumental.rutas.last, endsWith('abc_instrumental_1.m4a'));
     expect(voz.rutas.last, endsWith('abc_voz_1.m4a'));
     expect(instrumental.posicion, const Duration(seconds: 5));

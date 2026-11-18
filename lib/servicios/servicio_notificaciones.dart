@@ -64,6 +64,47 @@ abstract interface class MostradorNotificaciones {
   Future<String?> cancionAlAbrir();
 }
 
+/// Sin notificaciones push, para iOS: Firebase Cloud Messaging en iOS exige
+/// la cuenta de pago de Apple Developer. El estado de cada canción sigue
+/// disponible en «Mis canciones» (RF-09).
+class SinNotificaciones implements MensajeriaPush, MostradorNotificaciones {
+  /// Crea el servicio vacío.
+  const SinNotificaciones();
+
+  @override
+  Future<void> pedirPermiso() async {}
+
+  @override
+  Future<String?> obtenerToken() async => null;
+
+  @override
+  Stream<String> get tokensRenovados => const Stream<String>.empty();
+
+  @override
+  Stream<NotificacionRecibida> get notificacionesEnPrimerPlano =>
+      const Stream<NotificacionRecibida>.empty();
+
+  @override
+  Future<void> borrarToken() async {}
+
+  @override
+  Future<void> preparar() async {}
+
+  @override
+  Future<void> mostrar(
+    int id,
+    String titulo,
+    String texto, {
+    String? cancion,
+  }) async {}
+
+  @override
+  Stream<String> get cancionesTocadas => const Stream<String>.empty();
+
+  @override
+  Future<String?> cancionAlAbrir() async => null;
+}
+
 /// Notificaciones de finalización del procesamiento (Pb-4).
 ///
 /// Al iniciar sesión registra el celular en el servidor; al cerrarla lo
