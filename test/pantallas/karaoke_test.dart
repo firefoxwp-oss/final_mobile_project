@@ -95,6 +95,19 @@ class _PistaFalsa implements PistaAudio {
 }
 
 /// Micrófono simulado: escribe un archivo al grabar.
+/// Almacén cuyo guardado falla, por ejemplo por falta de espacio.
+class _AlmacenQueFalla extends AlmacenGrabaciones {
+  _AlmacenQueFalla({
+    required super.fabrica,
+    required super.rutaBase,
+    required super.carpeta,
+  });
+
+  @override
+  Future<Grabacion> guardar(Grabacion grabacion, String instrumental) =>
+      Future<Grabacion>.error(const FileSystemException('Sin espacio'));
+}
+
 class _GrabadorFalso implements GrabadorVoz {
   _GrabadorFalso({this.permiso = true});
 
@@ -444,6 +457,31 @@ void main() {
     expect(guardada.vozGuia, 30);
     expect(guardada.semitonos, 0);
     expect(File(guardada.rutaInstrumental).existsSync(), isTrue);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('si la grabación no se puede guardar avisa al usuario', (
+    tester,
+  ) async {
+    almacen = _AlmacenQueFalla(
+      fabrica: databaseFactoryFfi,
+      rutaBase: inMemoryDatabasePath,
+      carpeta: () async => cache,
+    );
+    await abrir(tester);
+    await tester.tap(find.byKey(const Key('botonGrabar')));
+    await esperar(tester);
+    instrumental.posicion = const Duration(seconds: 4);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.byKey(const Key('botonDetener')));
+    await esperar(tester);
+
+    await tester.ensureVisible(find.text('Guardar'));
+    await tester.tap(find.text('Guardar'));
+    await esperar(tester);
+
+    expect(find.text('No se pudo guardar la grabación.'), findsOne);
+    expect(find.byKey(const Key('resultadoGrabacion')), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
