@@ -1,6 +1,6 @@
 # Integracion continua de la aplicacion movil: estandar de codificacion,
-# pruebas y compilacion automatica del APK.
-name: Compilacion del APK
+# pruebas y compilacion automatica del APK y de la version de iOS.
+name: Compilacion del APK y de iOS
 
 on:
   push:
@@ -64,4 +64,44 @@ jobs:
         with:
           name: karaoke-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+
+  ios:
+    # iOS se compila en macOS sin firmar: no hace falta una Mac propia ni la
+    # cuenta de Apple Developer; la firma se agrega al publicar en la App Store
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.6"
+          channel: stable
+          cache: true
+
+      - name: Variables de entorno
+        env:
+          API_URL: ${{ vars.API_URL }}
+          WEB_URL: ${{ vars.WEB_URL }}
+        run: |
+          echo "API_URL=$API_URL" > .env
+          echo "WEB_URL=$WEB_URL" >> .env
+
+      - name: Dependencias
+        run: flutter pub get
+
+      - name: Compilar la aplicacion de iOS
+        run: flutter build ios --release --no-codesign
+
+      - name: Empaquetar el IPA sin firmar
+        run: |
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qr karaoke-ios.ipa Payload
+
+      - name: Publicar el IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: karaoke-ios
+          path: karaoke-ios.ipa
           retention-days: 30
