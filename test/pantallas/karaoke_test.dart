@@ -555,10 +555,14 @@ void main() {
 
     expect(find.text('+1'), findsOneWidget);
     expect(find.text('Preparando el tono…'), findsNothing);
-    expect(peticiones.where((String p) => p.contains('/tono/')), <String>[
-      '/jobs/abc/tono/1/instrumental',
-      '/jobs/abc/tono/1/voz',
-    ]);
+    // Las dos pistas se descargan a la vez: el orden puede variar
+    expect(
+      peticiones.where((String p) => p.contains('/tono/')),
+      unorderedEquals(<String>[
+        '/jobs/abc/tono/1/instrumental',
+        '/jobs/abc/tono/1/voz',
+      ]),
+    );
     expect(instrumental.rutas.last, endsWith('abc_instrumental_1.m4a'));
     expect(voz.rutas.last, endsWith('abc_voz_1.m4a'));
     expect(instrumental.posicion, const Duration(seconds: 5));
